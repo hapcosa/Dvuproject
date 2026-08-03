@@ -103,6 +103,15 @@ extract-dry: ## Extrae solo las 6 primeras páginas, sin imágenes (iteración r
 cargar-catalogo: ## Carga el resultado de la extracción a la BD
 	$(COMPOSE) run --rm api python -m dvu.cli cargar-catalogo
 
+# --- Fase 2: conciliación y DTE ----------------------------------------------
+.PHONY: conciliar
+conciliar: ## Trae la cartola del banco y concilia los pagos declarados
+	$(COMPOSE) run --rm api python -m dvu.cli conciliar
+
+.PHONY: cartola-demo
+cartola-demo: ## Cartola de prueba para ensayar la conciliación sin agregador
+	$(COMPOSE) run --rm api python -m dvu.cli cartola-demo
+
 # --- operación ---------------------------------------------------------------
 .PHONY: exportar
 exportar: ## Excel de ventas, detalle y pagos en ./data/exports

@@ -162,16 +162,52 @@ Reglas:
 | `estado` | text | `declarado` → `verificado` / `rechazado` / `pendiente_revision` |
 | `registrado_por` | fk usuario | El vendedor que lo subió |
 | `verificado_por` | fk usuario nullable | |
-| `movimiento_banco_id` | fk nullable | Fase 2: el match |
+| `movimiento_banco_id` | fk nullable **unique** | El abono que lo respalda |
+| `conciliacion_confianza` | numeric(4,3) nullable | Puntaje con que lo aceptó la máquina; null si lo decidió una persona |
 
 Un pago se aplica a uno o varios pedidos: tabla `pago_aplicacion`
 (`pago_id`, `pedido_id`, `monto_clp`). Esto es lo que permite manejar el caso real de
 "el cliente transfirió una vez para pagar tres facturas".
 
-## Fases 2–4 (esbozo)
+## Fase 2
 
-- `movimiento_banco` — cartola normalizada del agregador; motor de matching contra `pago`.
-- `dte` — documento tributario emitido (tipo, folio, XML, PDF, estado SII).
+### `movimiento_banco`
+
+Cartola normalizada del agregador.
+
+| Campo | Tipo | Notas |
+|---|---|---|
+| `id_externo` | text **unique** | Id del agregador. Es lo que hace **idempotente** resincronizar el mismo rango |
+| `proveedor` | text | `fake`, `fintoc` |
+| `fecha` | date | |
+| `monto_clp` | numeric(12,0) | Los cargos van negativos y **nunca** concilian un pago |
+| `descripcion` | text | Glosa del banco; suele traer el RUT de quien transfirió |
+| `referencia` | text nullable | N° de operación |
+| `rut_contraparte` | text nullable | Cuando el agregador lo entrega aparte |
+| `estado` | text | `sin_conciliar` / `conciliado` / `ignorado` |
+
+`pago.movimiento_banco_id` es **único**: un abono no puede respaldar dos comprobantes.
+Nada se borra — un abono que no es de un cliente se marca `ignorado` y sigue auditable.
+
+### `dte`
+
+| Campo | Tipo | Notas |
+|---|---|---|
+| `tipo` | int | 33 factura afecta, 52 guía de despacho, 61 nota de crédito |
+| `folio` | bigint nullable | Lo asigna el proveedor desde el CAF. Único junto con `tipo` |
+| `pedido_id`, `cliente_id` | fk | |
+| `rut_receptor` | text | Congelado: si el cliente cambia de razón social, el DTE emitido no cambia |
+| `neto_clp`, `iva_clp`, `total_clp` | numeric(12,0) | Copiados del pedido, no recalculados |
+| `estado` | text | `emitido` → `aceptado` / `rechazado` / `anulado` |
+| `track_id` | text nullable | Id del envío al SII, para consultar después |
+| `xml_key`, `pdf_key` | text nullable | Documentos en MinIO |
+| `referencia_dte_id` | fk self nullable | La factura que corrige una nota de crédito |
+
+Corregir una factura no es editarla ni borrarla: se emite una nota de crédito que la
+referencia y la factura queda `anulado`. Las dos filas se conservan.
+
+## Fases 3–4 (esbozo)
+
 - `lista_precio` / `lista_precio_item` — precios por cliente o segmento.
 - `despacho`, `despacho_parada`, `prueba_entrega` — logística y POD.
 - `stock` / `movimiento_stock` — cuando exista fuente confiable de inventario.

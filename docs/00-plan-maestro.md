@@ -113,12 +113,21 @@ durante 2 semanas seguidas, sin WhatsApp.
 
 ### Fase 2 — Pagos y tributación
 
-- Conciliación bancaria vía agregador (Fintoc / Floid) + matching automático
-- Bandeja de excepciones para lo que no matchea
-- DTE al SII: factura tipo 33, nota de crédito, guía de despacho electrónica
-- Pago en línea desde el sistema (Fintoc Pagos / Khipu / Webpay)
+- ✅ Conciliación bancaria vía agregador (Fintoc) + matching automático
+- ✅ Bandeja de excepciones para lo que no matchea
+- ✅ DTE al SII: factura tipo 33, nota de crédito 61, guía de despacho 52
+- ⬜ Pago en línea desde el sistema (Fintoc Pagos / Khipu / Webpay)
 
 **Criterio de salida:** ≥85% de los pagos conciliados sin intervención humana.
+
+El umbral de aplicación automática es 0,85 y el monto exacto es requisito duro. El
+puntaje con que se aceptó cada pago queda en `pago.conciliacion_confianza`, justamente
+para poder medir ese criterio contra datos reales y recalibrar los pesos: hoy están
+puestos sobre supuestos (que la glosa del banco suele traer el RUT y que los vendedores
+rara vez anotan el nº de operación), no sobre una cartola de DVU.
+
+Un empate nunca se resuelve solo. Si dos ferreterías transfirieron el mismo monto el
+mismo día sin referencia, los dos pagos van a la bandeja: elegir sería inventar.
 
 ### Fase 3 — Ecommerce B2B
 

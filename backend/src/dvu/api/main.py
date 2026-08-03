@@ -9,7 +9,17 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from dvu.api.routers import auth, clientes, health, pagos, pedidos, productos, reportes
+from dvu.api.routers import (
+    auth,
+    clientes,
+    conciliacion,
+    dte,
+    health,
+    pagos,
+    pedidos,
+    productos,
+    reportes,
+)
 from dvu.config import get_settings
 
 log = logging.getLogger("dvu")
@@ -56,6 +66,8 @@ def create_app() -> FastAPI:
         productos.router,
         pedidos.router,
         pagos.router,
+        conciliacion.router,
+        dte.router,
         reportes.router,
     ):
         app.include_router(router, prefix=cfg.api_prefix)

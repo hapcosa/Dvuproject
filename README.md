@@ -20,7 +20,7 @@ asistida y seguimiento del pedido hasta la entrega.
 |---|---|---|
 | 0 | Catálogo PDF → base de datos | Extractor y carga funcionando |
 | 1 | Backend de pedidos y pagos + app del vendedor | API funcionando; falta la app Flutter |
-| 2 | Conciliación bancaria + DTE al SII | Diseñada |
+| 2 | Conciliación bancaria + DTE al SII | Backend funcionando; falta pago en línea |
 | 3 | Ecommerce web para clientes | Diseñada |
 | 4 | Despacho y seguimiento | Diseñada |
 
@@ -104,6 +104,39 @@ sea múltiplo de la venta mínima (y responde con la `cantidad_sugerida` de **to
 líneas malas a la vez, porque reenviar cuesta señal), y un pago que no cuadra nunca se
 descarta: queda `pendiente_revision`.
 
+## Conciliación y DTE (Fase 2)
+
+Reemplaza al dueño verificando transferencias a mano contra la cartola del banco.
+
+| Método | Ruta | Rol | Para qué |
+|---|---|---|---|
+| `POST` | `/conciliacion/sincronizar` | admin | Trae la cartola y concilia lo que supera el umbral |
+| `GET` | `/conciliacion/bandeja` | admin | Pagos y abonos sin cruzar, los dos lados |
+| `POST` | `/conciliacion/aplicar` | admin | Confirma a mano un cruce de la bandeja |
+| `GET` | `/conciliacion/movimientos` | admin | La cartola ya sincronizada |
+| `POST` | `/conciliacion/movimientos/{id}/ignorar` | admin | Saca un abono que no es de un cliente |
+| `POST` | `/dte/facturas` | admin | Factura afecta tipo 33 |
+| `POST` | `/dte/guias` | admin | Guía de despacho tipo 52 |
+| `POST` | `/dte/notas-credito` | admin | Nota de crédito tipo 61; exige motivo |
+| `GET` | `/dte` | cualquiera | Documentos emitidos; el vendedor sólo los suyos |
+
+El matching es por monto exacto (requisito duro) más evidencia: nº de operación en la
+glosa, RUT de la contraparte y cercanía de fecha (±3 días, porque el banco acredita al
+día siguiente). Sobre 0,85 se aplica solo y queda registrado con qué confianza; **un
+empate nunca se resuelve automáticamente** — si dos ferreterías transfirieron lo mismo el
+mismo día, decide una persona. Nada se descarta ni se borra.
+
+Emitir es irreversible: un folio entregado al SII no se edita, se corrige con nota de
+crédito. Y un pedido no pasa a `despachado` sin guía electrónica emitida.
+
+Sin credenciales del agregador ni del proveedor de DTE el stack levanta igual, con los
+adaptadores `fake`. Para ensayar la conciliación:
+
+```bash
+make cartola-demo   # cartola de prueba a partir de los pagos declarados
+make conciliar
+```
+
 ## Desarrollo
 
 ```bash
@@ -121,6 +154,7 @@ los originales.
 ## Operación
 
 ```bash
+make conciliar           # cartola del banco → pagos verificados + bandeja
 make exportar            # Excel de ventas a data/exports/
 make backup              # dump a data/backups/
 scripts/backup_db.sh     # lo mismo, con retención y verificación — pensado para cron

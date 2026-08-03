@@ -307,6 +307,14 @@ class Pago(Base, UUIDMixin, TimestampMixin):
     registrado_por: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("usuario.id"))
     verificado_por: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("usuario.id"))
 
+    #: Fase 2: el movimiento de la cartola que respalda este pago.
+    movimiento_banco_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("movimiento_banco.id"), unique=True
+    )
+    #: Puntaje con que se concilió. Sirve para medir el criterio de salida de la fase
+    #: (≥85 % sin intervención) y para auditar qué aceptó la máquina sola.
+    conciliacion_confianza: Mapped[Decimal | None] = mapped_column(Numeric(4, 3))
+
     cliente: Mapped[Cliente] = relationship()
     aplicaciones: Mapped[list[PagoAplicacion]] = relationship(
         back_populates="pago", cascade="all, delete-orphan"
@@ -338,3 +346,98 @@ class PagoAplicacion(Base, TimestampMixin):
     pedido: Mapped[Pedido] = relationship()
 
     __table_args__ = (UniqueConstraint("pago_id", "pedido_id", name="uq_pago_pedido"),)
+
+
+# =============================================================================
+# Fase 2 — conciliación bancaria y documentos tributarios
+# =============================================================================
+
+
+class MovimientoBanco(Base, UUIDMixin, TimestampMixin):
+    """Cartola normalizada por el agregador (Fintoc / Floid).
+
+    Es un espejo del banco, no una opinión: se guarda tal como llega, con el
+    `id_externo` que da el proveedor como clave de idempotencia. Sincronizar el mismo
+    rango de fechas dos veces no duplica movimientos.
+    """
+
+    __tablename__ = "movimiento_banco"
+
+    id: Mapped[pk]
+    #: Identificador del proveedor. Único: es lo que hace idempotente la sincronización.
+    id_externo: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)
+    proveedor: Mapped[str] = mapped_column(String(32), nullable=False)
+    cuenta: Mapped[str | None] = mapped_column(String(64))
+
+    fecha: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    monto_clp: Mapped[Decimal] = mapped_column(Numeric(12, 0), nullable=False)
+    #: Glosa literal del banco. `Text` a propósito: viene con largos impredecibles y es
+    #: donde suele estar el RUT o el nº de operación.
+    descripcion: Mapped[str | None] = mapped_column(Text)
+    referencia: Mapped[str | None] = mapped_column(String(128), index=True)
+    rut_contraparte: Mapped[str | None] = mapped_column(String(16))
+
+    #: sin_conciliar -> conciliado | ignorado. `ignorado` es para lo que no es una venta
+    #: (cargos del banco, traspasos propios): se saca de la bandeja sin borrarlo.
+    estado: Mapped[str] = mapped_column(
+        String(24), default="sin_conciliar", nullable=False, index=True
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "estado IN ('sin_conciliar','conciliado','ignorado')", name="ck_movimiento_estado"
+        ),
+        Index("ix_movimiento_fecha_monto", "fecha", "monto_clp"),
+    )
+
+
+class Dte(Base, UUIDMixin, TimestampMixin):
+    """Documento tributario electrónico emitido al SII.
+
+    Todo cliente de DVU es empresa y descuenta IVA: el documento de venta es la
+    **factura tipo 33**, nunca boleta. El despacho requiere además guía tipo 52.
+
+    El folio lo asigna el proveedor de facturación contra el CAF autorizado por el SII;
+    aquí sólo se registra. Un DTE aceptado **no se modifica ni se borra**: se corrige
+    emitiendo una nota de crédito (tipo 61) que lo referencia.
+    """
+
+    __tablename__ = "dte"
+
+    id: Mapped[pk]
+    #: 33 factura afecta, 52 guía de despacho, 61 nota de crédito.
+    tipo: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    folio: Mapped[int | None] = mapped_column(BigInteger, index=True)
+
+    pedido_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("pedido.id"), index=True)
+    cliente_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("cliente.id"), index=True)
+
+    rut_receptor: Mapped[str] = mapped_column(String(16), nullable=False)
+    neto_clp: Mapped[Decimal] = mapped_column(Numeric(12, 0), nullable=False)
+    iva_clp: Mapped[Decimal] = mapped_column(Numeric(12, 0), nullable=False)
+    total_clp: Mapped[Decimal] = mapped_column(Numeric(12, 0), nullable=False)
+
+    #: emitido -> aceptado | rechazado | anulado. `rechazado` por el SII es un problema
+    #: operativo, no un error de programa: queda visible con su glosa.
+    estado: Mapped[str] = mapped_column(String(24), default="emitido", nullable=False, index=True)
+    #: Identificador de seguimiento del envío al SII.
+    track_id: Mapped[str | None] = mapped_column(String(64))
+    glosa_sii: Mapped[str | None] = mapped_column(Text)
+
+    xml_key: Mapped[str | None] = mapped_column(String(255))
+    pdf_key: Mapped[str | None] = mapped_column(String(255))
+
+    #: La nota de crédito referencia al documento que corrige.
+    referencia_dte_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("dte.id"))
+    emitido_por: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("usuario.id"))
+
+    pedido: Mapped[Pedido] = relationship()
+    cliente: Mapped[Cliente] = relationship()
+
+    __table_args__ = (
+        CheckConstraint("tipo IN (33,52,61)", name="ck_dte_tipo"),
+        CheckConstraint(
+            "estado IN ('emitido','aceptado','rechazado','anulado')", name="ck_dte_estado"
+        ),
+        UniqueConstraint("tipo", "folio", name="uq_dte_tipo_folio"),
+    )

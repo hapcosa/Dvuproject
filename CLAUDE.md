@@ -19,7 +19,8 @@ construcción. Vende **B2B**: sus clientes son otras ferreterías, no consumidor
 automática + DTE al SII + seguimiento del pedido hasta la entrega.
 
 El plan completo por fases está en [`docs/00-plan-maestro.md`](docs/00-plan-maestro.md).
-**Estado actual: Fase 0 (extractor de catálogo) y Fase 1 (backend de pedidos/pagos).**
+**Estado actual:** Fase 0 (extractor de catálogo), Fase 1 (backend de pedidos/pagos;
+falta la app Flutter) y Fase 2 (conciliación bancaria y DTE; falta el pago en línea).
 
 ## Reglas de dominio que NO se pueden violar
 
@@ -72,6 +73,7 @@ backend/
     domain/          Lógica de negocio pura (sin I/O, mypy strict)
     db/              Modelos SQLAlchemy, sesión, repositorios
     extractor/       Fase 0: PDF -> filas normalizadas
+    integraciones/   Terceros (banco, SII) detrás de un Protocol, con proveedor fake
     carga/           JSONL -> base de datos; datos de ejemplo
     workers/         Jobs arq
   alembic/           Migraciones
@@ -98,6 +100,8 @@ make extract       # corre el extractor sobre catalago/*.pdf
 make cargar-catalogo  # carga el JSONL extraído a la BD (idempotente)
 make seed          # usuarios y clientes de ejemplo (nunca en producción)
 make exportar      # genera el Excel de ventas en data/exports/
+make conciliar     # trae la cartola del banco y concilia los pagos declarados
+make cartola-demo  # cartola de prueba para ensayar la conciliación sin agregador
 ```
 
 ## Convenciones
