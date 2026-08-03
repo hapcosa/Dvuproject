@@ -19,6 +19,9 @@ construcción. Vende **B2B**: sus clientes son otras ferreterías, no consumidor
 automática + DTE al SII + seguimiento del pedido hasta la entrega.
 
 El plan completo por fases está en [`docs/00-plan-maestro.md`](docs/00-plan-maestro.md).
+Lo que falta y no es código —credenciales, trámites, decisiones del negocio— está en
+[`docs/03-puesta-en-marcha.md`](docs/03-puesta-en-marcha.md) (para quien opera el repo) y
+[`docs/04-que-necesitamos-de-dvu.md`](docs/04-que-necesitamos-de-dvu.md) (para los dueños).
 **Estado actual:** Fase 0 (extractor de catálogo), Fase 1 (backend de pedidos/pagos;
 falta la app Flutter) y Fase 2 (conciliación bancaria y DTE; falta el pago en línea).
 
