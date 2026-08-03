@@ -1,0 +1,96 @@
+"""Configuración central. Toda variable de entorno se declara aquí y en .env.example."""
+
+from __future__ import annotations
+
+from functools import lru_cache
+from pathlib import Path
+from typing import Literal
+
+from pydantic import Field, field_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+Entorno = Literal["development", "test", "staging", "production"]
+
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_prefix="DVU_",
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+
+    # --- general ---
+    env: Entorno = "development"
+    debug: bool = False
+    log_level: str = "INFO"
+    tz: str = "America/Santiago"
+
+    # --- api ---
+    api_prefix: str = "/api/v1"
+    cors_origins: list[str] = Field(default_factory=list)
+
+    # --- seguridad ---
+    secret_key: str = "cambiame-openssl-rand-hex-32"  # noqa: S105 — placeholder, no un secreto
+    jwt_algorithm: str = "HS256"
+    access_token_minutes: int = 60
+    refresh_token_days: int = 30
+
+    # --- infraestructura ---
+    database_url: str = "postgresql+psycopg://dvu:dvu@localhost:5432/dvu"
+    redis_url: str = "redis://localhost:6379/0"
+
+    s3_endpoint: str = "http://localhost:9000"
+    s3_access_key: str = ""
+    s3_secret_key: str = ""
+    s3_bucket: str = "dvu"
+    s3_region: str = "us-east-1"
+    s3_secure: bool = False
+
+    # --- extractor (Fase 0) ---
+    catalogo_dir: Path = Path("/app/catalago")
+    extractor_output_dir: Path = Path("/app/data/extraccion")
+    extractor_confianza_minima: float = 0.60
+
+    # --- reglas de negocio ---
+    iva: float = 0.19
+    precios_incluyen_iva: bool = False
+    moneda: str = "CLP"
+
+    # --- integraciones (fake por defecto: el stack levanta sin credenciales) ---
+    banco_proveedor: str = "fake"
+    pagos_proveedor: str = "fake"
+    dte_proveedor: str = "fake"
+    whatsapp_proveedor: str = "fake"
+
+    sentry_dsn: str = ""
+
+    @field_validator("cors_origins", mode="before")
+    @classmethod
+    def _split_csv(cls, v: object) -> object:
+        if isinstance(v, str):
+            return [o.strip() for o in v.split(",") if o.strip()]
+        return v
+
+    @property
+    def es_produccion(self) -> bool:
+        return self.env == "production"
+
+    def validar_para_produccion(self) -> None:
+        """Falla temprano si se intenta arrancar producción con valores de ejemplo."""
+        if not self.es_produccion:
+            return
+        problemas: list[str] = []
+        if "cambiame" in self.secret_key or len(self.secret_key) < 32:
+            problemas.append("DVU_SECRET_KEY es de ejemplo o muy corta")
+        if self.debug:
+            problemas.append("DVU_DEBUG=true en producción")
+        if "fake" in {self.dte_proveedor, self.pagos_proveedor}:
+            problemas.append("proveedores fake activos en producción")
+        if problemas:
+            raise RuntimeError("Configuración inválida para producción: " + "; ".join(problemas))
+
+
+@lru_cache
+def get_settings() -> Settings:
+    return Settings()
