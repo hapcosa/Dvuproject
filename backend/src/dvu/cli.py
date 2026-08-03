@@ -9,14 +9,17 @@ from typing import Annotated
 
 import typer
 
+from dvu.carga.cartola import cartola_de_prueba
 from dvu.carga.catalogo import cargar_catalogo
 from dvu.carga.excel import exportar_excel
 from dvu.carga.seed import SeedEnProduccion, sembrar
+from dvu.conciliacion import sincronizar_y_conciliar
 from dvu.config import get_settings
 from dvu.db.session import get_sessionmaker
 from dvu.extractor.catalogo_pdf import ResultadoExtraccion, extraer_pdf, iter_pdfs
 from dvu.extractor.imagenes import asociar_a_filas, extraer_imagenes
 from dvu.extractor.reporte import escribir_salidas
+from dvu.integraciones.banco import ErrorBanco
 
 app = typer.Typer(help="Herramientas del sistema DVU", no_args_is_help=True)
 
@@ -149,10 +152,58 @@ def exportar(
 
 
 @app.command()
+def conciliar(
+    desde: Annotated[str | None, typer.Option(help="Fecha inicial AAAA-MM-DD")] = None,
+    hasta: Annotated[str | None, typer.Option(help="Fecha final AAAA-MM-DD")] = None,
+) -> None:
+    """Trae la cartola del banco y concilia los pagos declarados.
+
+    Sin rango usa los últimos `DVU_CONCILIACION_DIAS_ATRAS` días. Lo que no cuadra queda
+    en la bandeja (`GET /conciliacion/bandeja`), no se descarta.
+    """
+    with get_sessionmaker()() as session:
+        try:
+            resumen = sincronizar_y_conciliar(
+                session,
+                desde=date.fromisoformat(desde) if desde else None,
+                hasta=date.fromisoformat(hasta) if hasta else None,
+            )
+        except ErrorBanco as exc:
+            typer.secho(f"No se pudo leer la cartola: {exc}", fg=typer.colors.RED)
+            raise typer.Exit(1) from exc
+        session.commit()
+
+    typer.echo(resumen.resumen())
+    for sugerencia in resumen.sugerencias:
+        typer.echo(
+            f"  pago {sugerencia.pago_id} ~ {sugerencia.movimiento_id_externo} "
+            f"({sugerencia.confianza:.2f}: {'; '.join(sugerencia.motivos)})"
+        )
+
+
+@app.command("cartola-demo")
+def cartola_demo(
+    salida: Annotated[Path | None, typer.Option(help="Ruta del JSONL a escribir")] = None,
+) -> None:
+    """Escribe una cartola de prueba que calza con los pagos del `seed`.
+
+    Sirve para ensayar la conciliación sin credenciales del agregador ni tocar la cuenta
+    real del dueño.
+    """
+    destino = salida or get_settings().cartola_fake_path
+    with get_sessionmaker()() as session:
+        lineas = cartola_de_prueba(session)
+
+    destino.parent.mkdir(parents=True, exist_ok=True)
+    destino.write_text("\n".join(lineas) + "\n", encoding="utf-8")
+    typer.echo(f"Cartola de prueba con {len(lineas)} movimientos en {destino}")
+
+
+@app.command()
 def config() -> None:
     """Muestra la configuración efectiva (sin secretos)."""
     cfg = get_settings()
-    ocultos = {"secret_key", "s3_secret_key"}
+    ocultos = {"secret_key", "s3_secret_key", "banco_api_key", "banco_link_token", "dte_api_key"}
     for campo in sorted(type(cfg).model_fields):
         valor = "***" if campo in ocultos else getattr(cfg, campo)
         typer.echo(f"  {campo:<32} {valor}")

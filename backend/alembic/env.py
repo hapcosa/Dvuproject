@@ -6,8 +6,12 @@ from alembic import context
 from sqlalchemy import engine_from_config, pool
 
 from dvu.config import get_settings
+from dvu.db import models
 from dvu.db.base import Base
-from dvu.db import models  # noqa: F401  — registra todos los modelos en el metadata
+
+#: `models` se importa por su efecto: registra todas las tablas en el metadata que
+#: Alembic autogenera. Sin esto, `--autogenerate` propondría borrarlas todas.
+_ = models
 
 config = context.config
 if config.config_file_name is not None:

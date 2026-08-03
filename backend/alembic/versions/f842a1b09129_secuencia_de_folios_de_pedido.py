@@ -4,6 +4,7 @@ Revision ID: f842a1b09129
 Revises: d49e04f8dc27
 Create Date: 2026-08-03 13:54:56.645845
 """
+
 from __future__ import annotations
 
 from collections.abc import Sequence
@@ -11,9 +12,8 @@ from collections.abc import Sequence
 import sqlalchemy as sa
 from alembic import op
 
-
-revision: str = 'f842a1b09129'
-down_revision: str | None = 'd49e04f8dc27'
+revision: str = "f842a1b09129"
+down_revision: str | None = "d49e04f8dc27"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

@@ -63,6 +63,25 @@ class Settings(BaseSettings):
     dte_proveedor: str = "fake"
     whatsapp_proveedor: str = "fake"
 
+    # --- conciliación bancaria (Fase 2) ---
+    banco_api_key: str = ""
+    banco_cuenta_id: str = ""
+    banco_link_token: str = ""
+    #: Cartola de prueba que lee el proveedor `fake`. Ver `dvu cartola-demo`.
+    cartola_fake_path: Path = Path("/app/data/cartola.jsonl")
+    #: Días hacia atrás que sincroniza una corrida sin rango explícito.
+    conciliacion_dias_atras: int = 7
+
+    # --- facturación electrónica (Fase 2) ---
+    dte_api_key: str = ""
+    dte_ambiente: Literal["certificacion", "produccion"] = "certificacion"
+    #: Emisor. Va en cada DTE; sin esto el SII rechaza el documento.
+    emisor_rut: str = "76000000-0"
+    emisor_razon_social: str = "COMERCIAL DVU SPA"
+    emisor_giro: str = "DISTRIBUCION DE PRODUCTOS FERRETEROS Y DE CONSTRUCCION"
+    emisor_direccion: str = ""
+    emisor_comuna: str = ""
+
     sentry_dsn: str = ""
 
     @field_validator("cors_origins", mode="before")

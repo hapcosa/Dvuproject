@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from contextlib import contextmanager
 from functools import lru_cache
 
 from sqlalchemy import Engine, create_engine
@@ -39,3 +40,7 @@ def get_session() -> Iterator[Session]:
         raise
     finally:
         session.close()
+
+
+#: La misma sesión, para lo que no es una request: workers arq y comandos del CLI.
+sesion = contextmanager(get_session)

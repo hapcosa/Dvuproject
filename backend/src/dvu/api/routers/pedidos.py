@@ -39,6 +39,7 @@ from dvu.domain.pedido import (
     transicionar,
     validar_cantidad,
 )
+from dvu.facturacion import tiene_guia
 
 router = APIRouter(prefix="/pedidos", tags=["pedidos"])
 
@@ -247,6 +248,14 @@ def cambiar_estado(
 
     if cambio.estado == EstadoPedido.ANULADO and not cambio.motivo:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail="Anular exige un motivo")
+
+    # La mercadería no sale sin guía de despacho electrónica: es la ley, y es lo que le
+    # piden al camión en la carretera.
+    if cambio.estado == EstadoPedido.DESPACHADO and not tiene_guia(session, pedido.id):
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail="Falta la guía de despacho electrónica (POST /dte/guias)",
+        )
 
     try:
         nuevo = transicionar(actual, cambio.estado)
