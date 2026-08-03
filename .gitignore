@@ -1,0 +1,35 @@
+# Catálogos fuente — ~380 MB, NO versionar
+catalago/*.pdf
+
+# Salidas del extractor
+data/
+out/
+*.sqlite
+
+# Entorno
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+dist/
+build/
+*.egg-info/
+
+# Editores / SO
+.idea/
+.vscode/
+.DS_Store
+
+# Docker
+.docker-data/
