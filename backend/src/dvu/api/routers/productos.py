@@ -2,6 +2,10 @@
 
 La búsqueda está pensada para el vendedor en terreno: escribe «codo media» o pega
 el código del proveedor que tenga a mano. Ambos caminos llegan al mismo producto.
+
+La edición es sólo de `admin`. El catálogo se carga desde el PDF (`make cargar-catalogo`)
+y esa sigue siendo la vía masiva; estos endpoints son para corregir a mano lo que el
+extractor no pudo leer bien y para los productos que no están en el PDF impreso.
 """
 
 from __future__ import annotations
@@ -10,16 +14,22 @@ import uuid as uuid_lib
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import func, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
-from dvu.db.models import Producto, ProductoAlias
+from dvu.almacenamiento import Almacen, get_almacen
+from dvu.api.deps import exige_rol
+from dvu.db.models import Producto, ProductoAlias, Usuario
 from dvu.db.session import get_session
 
 router = APIRouter(prefix="/productos", tags=["catálogo"])
 
 SessionDep = Annotated[Session, Depends(get_session)]
+AdminDep = Annotated[Usuario, Depends(exige_rol("admin"))]
+AlmacenDep = Annotated[Almacen, Depends(get_almacen)]
 
 
 class ProductoOut(BaseModel):
@@ -42,6 +52,36 @@ class ProductoOut(BaseModel):
 class PaginaProductos(BaseModel):
     total: int
     items: list[ProductoOut]
+
+
+class ProductoEntrada(BaseModel):
+    """Alta manual. El precio y el múltiplo son obligatorios: son las dos cosas sin las
+    cuales el vendedor no puede cotizar."""
+
+    sku: str = Field(min_length=1, max_length=64)
+    descripcion: str = Field(min_length=1)
+    precio_lista_clp: int = Field(ge=0)
+    #: Escalón de venta. DVU vende por caja: `1` sólo si el producto de verdad se vende
+    #: suelto, no como valor por defecto cómodo.
+    multiplo_venta: int = Field(default=1, ge=1)
+    unidad_venta: str = "UNID"
+    envase: str | None = None
+    marca: str | None = None
+    medida: str | None = None
+    codigos_proveedor: list[str] = Field(default_factory=list)
+
+
+class ProductoParche(BaseModel):
+    """Corrección puntual. Lo que no viene no se toca."""
+
+    descripcion: str | None = Field(default=None, min_length=1)
+    precio_lista_clp: int | None = Field(default=None, ge=0)
+    multiplo_venta: int | None = Field(default=None, ge=1)
+    unidad_venta: str | None = None
+    envase: str | None = None
+    marca: str | None = None
+    medida: str | None = None
+    activo: bool | None = None
 
 
 @router.get("", response_model=PaginaProductos)
@@ -86,6 +126,92 @@ def obtener(sku: str, session: SessionDep) -> ProductoOut:
     if producto is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail=f"No existe el producto {sku}")
     return _a_salida(producto)
+
+
+@router.get("/{sku}/imagen")
+def imagen(sku: str, session: SessionDep, almacen: AlmacenDep) -> RedirectResponse:
+    """Redirige a la foto del producto.
+
+    A diferencia del comprobante de pago, la foto de catálogo no tiene nada reservado:
+    es la misma que está impresa en el PDF. Va igual por URL firmada porque el bucket es
+    uno solo y no se abre al público por comodidad.
+    """
+    producto = _buscar(session, sku)
+    if producto.imagen_key is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail=f"{sku} no tiene imagen")
+    return RedirectResponse(almacen.url_firmada(producto.imagen_key), status_code=307)
+
+
+@router.post("", response_model=ProductoOut, status_code=status.HTTP_201_CREATED)
+def crear(entrada: ProductoEntrada, session: SessionDep, usuario: AdminDep) -> ProductoOut:
+    """Alta manual de un producto que no viene en el PDF."""
+    producto = Producto(
+        sku=entrada.sku.strip(),
+        descripcion=entrada.descripcion.strip(),
+        precio_lista_clp=entrada.precio_lista_clp,
+        multiplo_venta=entrada.multiplo_venta,
+        unidad_venta=entrada.unidad_venta,
+        envase=entrada.envase,
+        marca=entrada.marca,
+        medida=entrada.medida,
+    )
+    producto.alias = [
+        ProductoAlias(codigo=codigo.strip(), origen="manual")
+        for codigo in entrada.codigos_proveedor
+        if codigo.strip()
+    ]
+    session.add(producto)
+    try:
+        session.flush()
+    except IntegrityError as exc:
+        session.rollback()
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, detail=f"Ya existe un producto con SKU {entrada.sku}"
+        ) from exc
+    return _a_salida(producto)
+
+
+@router.patch("/{sku}", response_model=ProductoOut)
+def actualizar(
+    sku: str, parche: ProductoParche, session: SessionDep, usuario: AdminDep
+) -> ProductoOut:
+    """Corrige la ficha. `activo=false` la saca del catálogo sin borrar la fila: puede
+    estar referenciada en pedidos históricos."""
+    producto = _buscar(session, sku)
+    for campo, valor in parche.model_dump(exclude_unset=True).items():
+        setattr(producto, campo, valor)
+    session.flush()
+    return _a_salida(producto)
+
+
+@router.post("/{sku}/alias", response_model=ProductoOut, status_code=status.HTTP_201_CREATED)
+def agregar_alias(sku: str, codigo: str, session: SessionDep, usuario: AdminDep) -> ProductoOut:
+    """Suma un código de proveedor. El vendedor busca por el que tenga a mano."""
+    producto = _buscar(session, sku)
+    limpio = codigo.strip()
+    if not limpio:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, detail="El código viene vacío")
+    if any(a.codigo == limpio for a in producto.alias):
+        return _a_salida(producto)
+
+    producto.alias.append(ProductoAlias(codigo=limpio, origen="manual"))
+    try:
+        session.flush()
+    except IntegrityError as exc:
+        session.rollback()
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, detail=f"El código {limpio} ya está en uso"
+        ) from exc
+    return _a_salida(producto)
+
+
+def _buscar(session: Session, sku: str) -> Producto:
+    producto = session.scalar(
+        select(Producto).options(selectinload(Producto.alias)).where(Producto.sku == sku)
+    )
+    if producto is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail=f"No existe el producto {sku}")
+    return producto
 
 
 def _a_salida(producto: Producto) -> ProductoOut:

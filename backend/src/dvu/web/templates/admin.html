@@ -1,0 +1,281 @@
+{% extends "base.html" %}
+
+{% block contenido %}
+{% with pista_login = "Sólo administración. En desarrollo: admin@dvu.cl / dvu-dev-1234" %}
+  {% include "_login.html" %}
+{% endwith %}
+
+<div id="app" hidden>
+  <section class="tarjeta">
+    <h2>Administrar catálogo</h2>
+    <p class="pista">
+      La carga masiva sigue siendo <code>make cargar-catalogo</code> desde el PDF.
+      Esto es para corregir a mano lo que el extractor leyó mal y para lo que no está
+      impreso. Nada se borra: desactivar saca el producto del catálogo pero conserva la
+      ficha, porque puede estar referenciada en pedidos viejos.
+    </p>
+    <div id="mensaje" hidden></div>
+  </section>
+
+  <section class="tarjeta">
+    <h3>Agregar producto</h3>
+    <form id="form-nuevo">
+      <div class="rejilla">
+        <div class="campo">
+          <label for="sku">SKU interno</label>
+          <input id="sku" name="sku" required placeholder="DVU-00123">
+        </div>
+        <div class="campo ancho">
+          <label for="descripcion">Descripción</label>
+          <input id="descripcion" name="descripcion" required>
+        </div>
+        <div class="campo">
+          <label for="precio_lista_clp">Precio (CLP)</label>
+          <input id="precio_lista_clp" name="precio_lista_clp" inputmode="numeric" required>
+        </div>
+        <div class="campo">
+          <label for="multiplo_venta">Múltiplo de venta</label>
+          <input id="multiplo_venta" name="multiplo_venta" type="number" min="1" value="1" required>
+        </div>
+        <div class="campo">
+          <label for="envase">Envase</label>
+          <input id="envase" name="envase" placeholder="CAJA, BOLSA, UNID">
+        </div>
+        <div class="campo">
+          <label for="marca">Marca</label>
+          <input id="marca" name="marca">
+        </div>
+        <div class="campo">
+          <label for="medida">Medida</label>
+          <input id="medida" name="medida" placeholder='1/2"'>
+        </div>
+        <div class="campo ancho">
+          <label for="codigos_proveedor">Códigos de proveedor</label>
+          <input id="codigos_proveedor" name="codigos_proveedor" placeholder="PR/49573, KM521">
+        </div>
+      </div>
+      <p class="pista">
+        El múltiplo es el escalón de compra. Deja <strong>1</strong> sólo si el producto
+        de verdad se vende suelto: si es por caja y pones 1, el vendedor cotiza una
+        cantidad que no se puede despachar.
+      </p>
+      <button type="submit">Agregar</button>
+    </form>
+  </section>
+
+  <section class="tarjeta">
+    <h3>Buscar y editar</h3>
+    <form class="buscador" id="buscador">
+      <input type="search" id="q" placeholder="Descripción, SKU o código del proveedor"
+             aria-label="Buscar producto">
+      <button type="submit">Buscar</button>
+    </form>
+    <p class="pista">
+      Haz clic en una celda con fondo claro para editarla. Sale del campo y se guarda.
+    </p>
+  </section>
+
+  <div class="desplazable">
+    <table class="datos editable">
+      <thead>
+        <tr>
+          <th>SKU</th><th>Descripción</th><th>Múltiplo</th><th>Envase</th>
+          <th>Marca</th><th>Medida</th><th>Precio</th><th>Códigos</th><th></th>
+        </tr>
+      </thead>
+      <tbody id="filas"><tr><td colspan="9">Busca un producto para editarlo.</td></tr></tbody>
+    </table>
+  </div>
+
+  <div class="paginacion">
+    <button class="plano" id="anterior">‹ Anterior</button>
+    <span id="rango"></span>
+    <button class="plano" id="siguiente">Siguiente ›</button>
+  </div>
+</div>
+{% endblock %}
+
+{% block script %}
+<script>
+const POR_PAGINA = 25;
+let offset = 0;
+let consulta = "";
+
+const filas = document.getElementById("filas");
+const mensaje = document.getElementById("mensaje");
+
+/** Celda editable in situ. `campo` es el nombre que espera PATCH /productos/{sku}. */
+function celda(producto, campo, tipo = "texto") {
+  const valor = producto[campo];
+  const texto = tipo === "peso" ? DVU.pesos(valor) : DVU.escapar(valor ?? "");
+  return `<td class="edit ${tipo === 'peso' || tipo === 'entero' ? 'numero' : ''}"
+              contenteditable="plaintext-only"
+              data-sku="${DVU.escapar(producto.sku)}"
+              data-campo="${campo}" data-tipo="${tipo}"
+              >${texto || (tipo === "texto" ? "" : "0")}</td>`;
+}
+
+function fila(p) {
+  return `
+    <tr data-sku="${DVU.escapar(p.sku)}">
+      <td><code>${DVU.escapar(p.sku)}</code></td>
+      ${celda(p, "descripcion")}
+      ${celda(p, "multiplo_venta", "entero")}
+      ${celda(p, "envase")}
+      ${celda(p, "marca")}
+      ${celda(p, "medida")}
+      ${celda(p, "precio_lista_clp", "peso")}
+      <td class="codigos">
+        ${p.codigos_proveedor.map((c) => `<code>${DVU.escapar(c)}</code>`).join(" ") ||
+          '<span class="vacio">—</span>'}
+        <button class="plano" data-alias="${DVU.escapar(p.sku)}">+</button>
+      </td>
+      <td><button class="plano" data-desactivar="${DVU.escapar(p.sku)}">Desactivar</button></td>
+    </tr>`;
+}
+
+async function cargar() {
+  mensaje.hidden = true;
+  filas.innerHTML = '<tr><td colspan="9">Cargando…</td></tr>';
+  const p = new URLSearchParams({ limite: POR_PAGINA, offset });
+  if (consulta) p.set("q", consulta);
+  try {
+    const pagina = await DVU.pedir(`/productos?${p}`);
+    filas.innerHTML = pagina.items.length
+      ? pagina.items.map(fila).join("")
+      : '<tr><td colspan="9">Sin resultados.</td></tr>';
+    const desde = pagina.total ? offset + 1 : 0;
+    const hasta = Math.min(offset + POR_PAGINA, pagina.total);
+    document.getElementById("rango").textContent =
+      `${desde}–${hasta} de ${pagina.total.toLocaleString("es-CL")}`;
+    document.getElementById("anterior").disabled = offset === 0;
+    document.getElementById("siguiente").disabled = hasta >= pagina.total;
+  } catch (e) {
+    filas.innerHTML = "";
+    DVU.avisar(mensaje, e.message, "error");
+  }
+}
+
+/** Sólo dígitos: el peso chileno no tiene decimales y el múltiplo es una cuenta de piezas. */
+const soloEnteros = (texto) => Number(String(texto).replace(/[^\d]/g, ""));
+
+filas.addEventListener("focusout", async (evento) => {
+  const celda = evento.target;
+  if (!celda.classList?.contains("edit")) return;
+
+  const { sku, campo, tipo } = celda.dataset;
+  const crudo = celda.textContent.trim();
+  const valor = tipo === "texto" ? (crudo || null) : soloEnteros(crudo);
+
+  if (tipo !== "texto" && (!Number.isFinite(valor) || valor < (tipo === "entero" ? 1 : 0))) {
+    DVU.avisar(mensaje, `${campo}: valor inválido, no se guardó.`, "error");
+    return cargar();
+  }
+
+  celda.classList.add("guardando");
+  try {
+    const producto = await DVU.pedir(`/productos/${encodeURIComponent(sku)}`, {
+      method: "PATCH", body: { [campo]: valor },
+    });
+    // Se repinta la celda con lo que quedó guardado, no con lo tecleado: si el
+    // backend normalizó algo, es eso lo que hay que ver.
+    celda.textContent = tipo === "peso" ? DVU.pesos(producto[campo]) : (producto[campo] ?? "");
+    celda.classList.remove("guardando");
+    celda.classList.add("guardado");
+    setTimeout(() => celda.classList.remove("guardado"), 1200);
+  } catch (e) {
+    celda.classList.remove("guardando");
+    DVU.avisar(mensaje, e.message, "error");
+    cargar();
+  }
+});
+
+// Enter guarda en vez de meter un salto de línea dentro de la celda.
+filas.addEventListener("keydown", (evento) => {
+  if (evento.key === "Enter" && evento.target.classList?.contains("edit")) {
+    evento.preventDefault();
+    evento.target.blur();
+  }
+});
+
+filas.addEventListener("click", async (evento) => {
+  const datos = evento.target.dataset || {};
+
+  if (datos.alias) {
+    const codigo = prompt(`Código de proveedor para ${datos.alias}:`);
+    if (!codigo?.trim()) return;
+    try {
+      await DVU.pedir(
+        `/productos/${encodeURIComponent(datos.alias)}/alias?codigo=${encodeURIComponent(codigo.trim())}`,
+        { method: "POST" }
+      );
+      cargar();
+    } catch (e) {
+      DVU.avisar(mensaje, e.message, "error");
+    }
+    return;
+  }
+
+  if (datos.desactivar) {
+    if (!confirm(`Sacar ${datos.desactivar} del catálogo? La ficha se conserva.`)) return;
+    try {
+      await DVU.pedir(`/productos/${encodeURIComponent(datos.desactivar)}`, {
+        method: "PATCH", body: { activo: false },
+      });
+      DVU.avisar(mensaje, `${datos.desactivar} ya no aparece en el catálogo.`, "ok");
+      cargar();
+    } catch (e) {
+      DVU.avisar(mensaje, e.message, "error");
+    }
+  }
+});
+
+document.getElementById("form-nuevo").onsubmit = async (evento) => {
+  evento.preventDefault();
+  const f = evento.target;
+  const opcional = (nombre) => f[nombre].value.trim() || null;
+  try {
+    await DVU.pedir("/productos", {
+      method: "POST",
+      body: {
+        sku: f.sku.value.trim(),
+        descripcion: f.descripcion.value.trim(),
+        precio_lista_clp: soloEnteros(f.precio_lista_clp.value),
+        multiplo_venta: Number(f.multiplo_venta.value),
+        envase: opcional("envase"),
+        marca: opcional("marca"),
+        medida: opcional("medida"),
+        codigos_proveedor: f.codigos_proveedor.value.split(/[,;]+/)
+          .map((c) => c.trim()).filter(Boolean),
+      },
+    });
+    DVU.avisar(mensaje, `Producto ${f.sku.value.trim()} agregado.`, "ok");
+    consulta = f.sku.value.trim();
+    document.getElementById("q").value = consulta;
+    f.reset();
+    f.multiplo_venta.value = 1;
+    offset = 0;
+    cargar();
+  } catch (e) {
+    DVU.avisar(mensaje, e.message, "error");
+  }
+};
+
+document.getElementById("buscador").onsubmit = (evento) => {
+  evento.preventDefault();
+  consulta = document.getElementById("q").value.trim();
+  offset = 0;
+  cargar();
+};
+document.getElementById("anterior").onclick = () => {
+  offset = Math.max(0, offset - POR_PAGINA);
+  cargar();
+};
+document.getElementById("siguiente").onclick = () => {
+  offset += POR_PAGINA;
+  cargar();
+};
+
+DVU.proteger({ rol: ["admin"], alIngresar: cargar });
+</script>
+{% endblock %}

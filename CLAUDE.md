@@ -21,6 +21,9 @@ automática + DTE al SII + seguimiento del pedido hasta la entrega.
 El plan completo por fases está en [`docs/00-plan-maestro.md`](docs/00-plan-maestro.md).
 **Estado actual:** Fase 0 (extractor de catálogo), Fase 1 (backend de pedidos/pagos;
 falta la app Flutter) y Fase 2 (conciliación bancaria y DTE; falta el pago en línea).
+Más un **prototipo web** para mostrar: catálogo editable por el administrador y la
+página donde el vendedor carga lo que hoy manda por WhatsApp
+([`docs/05-catalogo-web.md`](docs/05-catalogo-web.md)).
 
 ## Reglas de dominio que NO se pueden violar
 
@@ -74,7 +77,8 @@ backend/
     db/              Modelos SQLAlchemy, sesión, repositorios
     extractor/       Fase 0: PDF -> filas normalizadas
     integraciones/   Terceros (banco, SII) detrás de un Protocol, con proveedor fake
-    carga/           JSONL -> base de datos; datos de ejemplo
+    carga/           JSONL -> base de datos; datos de ejemplo; exportadores a Excel
+    web/             Prototipo web: plantillas Jinja + CSS/JS sin build
     workers/         Jobs arq
   alembic/           Migraciones
   tests/

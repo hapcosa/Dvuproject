@@ -1,0 +1,191 @@
+{% extends "base.html" %}
+
+{% block contenido %}
+{% with pista_login = "Entra con tu usuario de vendedor. En desarrollo: vendedor@dvu.cl / dvu-dev-1234" %}
+  {% include "_login.html" %}
+{% endwith %}
+
+<div id="app" hidden>
+  <section class="tarjeta">
+    <h2>Registrar comprobante de transferencia</h2>
+    <p class="pista">
+      Lo mismo que mandas al grupo «COMPROBANTES TRANSF.», pero queda guardado.
+      Si te falta un dato, envíalo igual: se registra marcado y cobranza lo completa.
+      Nunca se pierde un aviso.
+    </p>
+
+    <div id="resultado" hidden></div>
+
+    <form id="form">
+      <div class="campo">
+        <label for="detalle">Mensaje (escríbelo como se lo mandarías al grupo)</label>
+        <textarea id="detalle" name="detalle" required
+          placeholder="Ej: Ferretería El Martillo, abono factura 33780 por 510.459, BCI op 12345678"></textarea>
+        <p class="pista" style="margin:4px 0 0">
+          De aquí se leen solos el monto y las facturas. Los campos de abajo mandan
+          sobre lo que diga el texto.
+        </p>
+      </div>
+
+      <div class="rejilla">
+        <div class="campo">
+          <label for="cliente_texto">Cliente</label>
+          <input id="cliente_texto" name="cliente_texto" placeholder="Ferretería El Martillo">
+        </div>
+        <div class="campo">
+          <label for="cliente_rut">RUT del cliente <span class="vacio">(si lo tienes)</span></label>
+          <input id="cliente_rut" name="cliente_rut" placeholder="76123456-0">
+        </div>
+        <div class="campo">
+          <label for="facturas">Factura(s)</label>
+          <input id="facturas" name="facturas" placeholder="33780, 33135">
+        </div>
+        <div class="campo">
+          <label for="monto_clp">Monto transferido</label>
+          <input id="monto_clp" name="monto_clp" inputmode="numeric" placeholder="510.459">
+        </div>
+        <div class="campo">
+          <label for="banco">Banco</label>
+          <input id="banco" name="banco" list="bancos" placeholder="BCI">
+          <datalist id="bancos">
+            <option>BANCO DE CHILE</option><option>BANCO ESTADO</option><option>BCI</option>
+            <option>SANTANDER</option><option>ITAU</option><option>SCOTIABANK</option>
+            <option>SECURITY</option><option>FALABELLA</option><option>BICE</option>
+            <option>CONSORCIO</option><option>MERCADO PAGO</option><option>TENPO</option>
+          </datalist>
+        </div>
+        <div class="campo">
+          <label for="numero_operacion">N° de operación</label>
+          <input id="numero_operacion" name="numero_operacion" inputmode="numeric">
+        </div>
+        <div class="campo">
+          <label for="fecha_transferencia">Fecha de la transferencia</label>
+          <input id="fecha_transferencia" name="fecha_transferencia" type="date">
+        </div>
+        <div class="campo">
+          <label for="rut_contraparte">RUT que transfirió</label>
+          <input id="rut_contraparte" name="rut_contraparte" placeholder="76123456-0">
+        </div>
+      </div>
+
+      <div class="campo">
+        <label for="imagen">Foto o PDF del comprobante</label>
+        <input id="imagen" name="imagen" type="file"
+               accept="image/jpeg,image/png,image/webp,image/heic,application/pdf">
+      </div>
+
+      <button type="submit" id="enviar">Registrar comprobante</button>
+    </form>
+  </section>
+
+  <section class="tarjeta">
+    <h2>Mis últimos comprobantes</h2>
+    <p class="pista">Sólo los tuyos. Cobranza ve los de todos.</p>
+    <div class="desplazable">
+      <table class="datos">
+        <thead>
+          <tr>
+            <th>Fecha</th><th>Cliente</th><th>Factura(s)</th><th>Monto</th>
+            <th>N° op.</th><th>Estado</th><th>Observación</th>
+          </tr>
+        </thead>
+        <tbody id="mios"><tr><td colspan="7">Cargando…</td></tr></tbody>
+      </table>
+    </div>
+  </section>
+</div>
+{% endblock %}
+
+{% block script %}
+<script>
+const resultado = document.getElementById("resultado");
+
+/** Sólo los campos con valor. Un vacío no se manda: el backend distingue
+ *  "no lo sé" de "está vacío", y mandar "" borraría el dato leído del texto. */
+function cuerpo(formulario) {
+  const dato = (nombre) => formulario[nombre].value.trim() || null;
+  const monto = dato("monto_clp");
+  const facturas = dato("facturas");
+
+  const salida = {
+    detalle: formulario.detalle.value.trim(),
+    cliente_texto: formulario.cliente_texto.value.trim(),
+    cliente_rut: dato("cliente_rut"),
+    banco: dato("banco"),
+    rut_contraparte: dato("rut_contraparte"),
+    numero_operacion: dato("numero_operacion"),
+    fecha_transferencia: dato("fecha_transferencia"),
+    // Idempotencia: si el envío se corta y se reintenta, no se duplica la fila.
+    client_uuid: crypto.randomUUID(),
+  };
+  if (monto) salida.monto_clp = Number(monto.replace(/[.\s$]/g, ""));
+  if (facturas) salida.facturas = facturas.split(/[,;\s]+|\sy\s/).filter(Boolean);
+  return salida;
+}
+
+document.getElementById("form").onsubmit = async (evento) => {
+  evento.preventDefault();
+  const boton = document.getElementById("enviar");
+  const formulario = evento.target;
+  boton.disabled = true;
+  resultado.hidden = true;
+
+  try {
+    const comprobante = await DVU.pedir("/comprobantes", {
+      method: "POST",
+      body: cuerpo(formulario),
+    });
+
+    const archivo = formulario.imagen.files[0];
+    if (archivo) {
+      const datos = new FormData();
+      datos.append("archivo", archivo);
+      await DVU.pedir(`/comprobantes/${comprobante.uuid}/imagen`, {
+        method: "POST", body: datos,
+      });
+    }
+
+    // El estado se muestra al tiro: si quedó incompleto, el vendedor puede
+    // arreglarlo ahora que todavía tiene el comprobante a la vista.
+    const listo = comprobante.estado === "listo";
+    DVU.avisar(
+      resultado,
+      listo
+        ? `Registrado. ${comprobante.estado_etiqueta}.`
+        : `Registrado, pero quedó ${comprobante.estado_etiqueta}. ` +
+          (comprobante.observacion || "Revísalo con cobranza."),
+      listo ? "ok" : "info"
+    );
+    formulario.reset();
+    cargarMios();
+  } catch (e) {
+    DVU.avisar(resultado, e.message, "error");
+  } finally {
+    boton.disabled = false;
+  }
+};
+
+async function cargarMios() {
+  const cuerpoTabla = document.getElementById("mios");
+  try {
+    const pagina = await DVU.pedir("/comprobantes?limite=20");
+    cuerpoTabla.innerHTML = pagina.items.length
+      ? pagina.items.map((c) => `
+        <tr>
+          <td>${new Date(c.creado_en).toLocaleDateString("es-CL")}</td>
+          <td>${DVU.escapar(c.cliente) || '<span class="vacio">—</span>'}</td>
+          <td>${DVU.escapar(c.facturas.join(", ")) || '<span class="vacio">—</span>'}</td>
+          <td>${DVU.pesos(c.monto_clp) || '<span class="vacio">—</span>'}</td>
+          <td>${DVU.oVacio(c.numero_operacion)}</td>
+          <td><span class="pastilla estado-${c.estado}">${DVU.escapar(c.estado_etiqueta)}</span></td>
+          <td>${DVU.escapar(c.observacion)}</td>
+        </tr>`).join("")
+      : '<tr><td colspan="7">Todavía no registraste ninguno.</td></tr>';
+  } catch (e) {
+    cuerpoTabla.innerHTML = `<tr><td colspan="7">${DVU.escapar(e.message)}</td></tr>`;
+  }
+}
+
+DVU.proteger({ rol: ["vendedor"], alIngresar: cargarMios });
+</script>
+{% endblock %}

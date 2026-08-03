@@ -23,6 +23,8 @@ init: .env ## Prepara el entorno local por primera vez
 up: .env ## Levanta el stack completo
 	$(COMPOSE) up -d --build
 	@echo "API:            http://localhost:$${DVU_API_PORT:-8000}/docs"
+	@echo "Catálogo web:   http://localhost:$${DVU_API_PORT:-8000}/"
+	@echo "Vendedor:       http://localhost:$${DVU_API_PORT:-8000}/vendedor"
 	@echo "MinIO console:  http://localhost:9001"
 
 .PHONY: down

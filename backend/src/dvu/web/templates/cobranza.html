@@ -1,0 +1,220 @@
+{% extends "base.html" %}
+
+{% block contenido %}
+{% with pista_login = "Sólo cobranza y administración. En desarrollo: admin@dvu.cl / dvu-dev-1234" %}
+  {% include "_login.html" %}
+{% endwith %}
+
+<div id="app" hidden>
+  <section class="tarjeta">
+    <h2>Bandeja de comprobantes</h2>
+    <p class="pista">
+      Lo que hoy hay que leer a mano en el grupo de WhatsApp. Los colores son los mismos
+      del Excel: verde entra tal cual, amarillo hay que preguntar, rojo falta un dato,
+      azul es abono parcial.
+    </p>
+
+    <form class="filtros" id="filtros">
+      <div class="campo">
+        <label for="estado">Estado</label>
+        <select id="estado" name="estado">
+          <option value="">Todos</option>
+          <option value="listo">Listo para ingresar</option>
+          <option value="abono_parcial">Abono parcial</option>
+          <option value="duplicado_posible">Posible duplicado</option>
+          <option value="falta_monto">Falta monto</option>
+          <option value="falta_factura">Falta factura</option>
+          <option value="falta_cliente">Falta cliente</option>
+          <option value="falta_dato">Falta dato</option>
+        </select>
+      </div>
+      <div class="campo">
+        <label for="desde">Desde</label>
+        <input id="desde" name="desde" type="date">
+      </div>
+      <div class="campo">
+        <label for="hasta">Hasta</label>
+        <input id="hasta" name="hasta" type="date">
+      </div>
+      <div class="campo casilla">
+        <label><input type="checkbox" id="pendientes" checked> Sólo sin ingresar</label>
+      </div>
+      <div class="campo acciones">
+        <button type="submit">Filtrar</button>
+        <button type="button" class="plano" id="excel">Descargar Excel</button>
+      </div>
+    </form>
+
+    <div id="mensaje" hidden></div>
+    <p class="pista" id="resumen"></p>
+  </section>
+
+  <div class="desplazable">
+    <table class="datos">
+      <thead>
+        <tr>
+          <th>Fecha</th><th>Vendedor</th><th>Cliente</th><th>Factura(s)</th>
+          <th>Monto</th><th>Banco</th><th>N° op.</th><th>Comp.</th>
+          <th>Estado</th><th>Observación</th><th></th>
+        </tr>
+      </thead>
+      <tbody id="filas"><tr><td colspan="11">Cargando…</td></tr></tbody>
+    </table>
+  </div>
+
+  <div class="paginacion">
+    <button class="plano" id="anterior">‹ Anterior</button>
+    <span id="rango"></span>
+    <button class="plano" id="siguiente">Siguiente ›</button>
+  </div>
+</div>
+{% endblock %}
+
+{% block script %}
+<script>
+const POR_PAGINA = 50;
+let offset = 0;
+
+const filas = document.getElementById("filas");
+const mensaje = document.getElementById("mensaje");
+
+function parametros() {
+  const p = new URLSearchParams({ limite: POR_PAGINA, offset });
+  const estado = document.getElementById("estado").value;
+  const desde = document.getElementById("desde").value;
+  const hasta = document.getElementById("hasta").value;
+  if (estado) p.set("estado", estado);
+  if (desde) p.set("desde", desde);
+  if (hasta) p.set("hasta", hasta);
+  if (document.getElementById("pendientes").checked) p.set("pendientes", "true");
+  return p;
+}
+
+function fila(c) {
+  return `
+    <tr class="${c.ingresado ? 'ingresado' : ''}">
+      <td>${new Date(c.creado_en).toLocaleDateString("es-CL")}</td>
+      <td>${DVU.escapar(c.vendedor)}</td>
+      <td>${DVU.oVacio(c.cliente)}${
+        c.cliente_rut ? `<br><small>${DVU.escapar(c.cliente_rut)}</small>` : ""
+      }</td>
+      <td>${DVU.oVacio(c.facturas.join(", "))}</td>
+      <td class="numero">${c.monto_clp === null ? DVU.oVacio(null) : DVU.pesos(c.monto_clp)}</td>
+      <td>${DVU.oVacio(c.banco)}</td>
+      <td>${DVU.oVacio(c.numero_operacion)}</td>
+      <td>${
+        c.tiene_imagen
+          ? `<button class="plano" data-imagen="${c.uuid}">ver</button>`
+          : '<span class="vacio">—</span>'
+      }</td>
+      <td><span class="pastilla estado-${c.estado}">${DVU.escapar(c.estado_etiqueta)}</span></td>
+      <td class="observacion">${DVU.escapar(c.observacion)}${
+        c.detalle ? `<br><small>${DVU.escapar(c.detalle)}</small>` : ""
+      }</td>
+      <td>${
+        c.ingresado
+          ? '<span class="vacio">ingresado</span>'
+          : `<button class="plano" data-ingresar="${c.uuid}">Ingresado</button>`
+      }</td>
+    </tr>`;
+}
+
+async function cargar() {
+  mensaje.hidden = true;
+  filas.innerHTML = '<tr><td colspan="11">Cargando…</td></tr>';
+  try {
+    const pagina = await DVU.pedir(`/comprobantes?${parametros()}`);
+    filas.innerHTML = pagina.items.length
+      ? pagina.items.map(fila).join("")
+      : '<tr><td colspan="11">Nada pendiente con ese filtro.</td></tr>';
+
+    const desde = pagina.total ? offset + 1 : 0;
+    const hasta = Math.min(offset + POR_PAGINA, pagina.total);
+    document.getElementById("rango").textContent = `${desde}–${hasta} de ${pagina.total}`;
+    document.getElementById("anterior").disabled = offset === 0;
+    document.getElementById("siguiente").disabled = hasta >= pagina.total;
+    resumir(pagina.items);
+  } catch (e) {
+    filas.innerHTML = "";
+    DVU.avisar(mensaje, e.message, "error");
+  }
+}
+
+/** Cuenta rápida de la página visible: cuánto se declaró y cuánto hay que preguntar. */
+function resumir(items) {
+  const conMonto = items.filter((c) => c.monto_clp !== null);
+  const total = conMonto.reduce((suma, c) => suma + c.monto_clp, 0);
+  const dudosos = items.filter((c) => c.estado !== "listo").length;
+  document.getElementById("resumen").textContent = items.length
+    ? `${items.length} comprobantes en pantalla · ${DVU.pesos(total)} declarados` +
+      (conMonto.length < items.length ? ` (${items.length - conMonto.length} sin monto)` : "") +
+      ` · ${dudosos} necesitan revisión`
+    : "";
+}
+
+filas.onclick = async (evento) => {
+  const datos = evento.target.dataset || {};
+
+  // La imagen va detrás de autenticación: no se puede enlazar directo porque una
+  // etiqueta <a> no manda el token. Se pide con el token y se abre lo que vuelve.
+  if (datos.imagen) {
+    evento.target.disabled = true;
+    try {
+      const blob = await DVU.pedir(`/comprobantes/${datos.imagen}/imagen`);
+      const url = URL.createObjectURL(blob);
+      window.open(url, "_blank", "noopener");
+      // Se revoca tarde: si se revoca al tiro, la pestaña recién abierta queda en blanco.
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (e) {
+      DVU.avisar(mensaje, e.message, "error");
+    } finally {
+      evento.target.disabled = false;
+    }
+    return;
+  }
+
+  if (!datos.ingresar) return;
+  evento.target.disabled = true;
+  try {
+    await DVU.pedir(`/comprobantes/${datos.ingresar}/ingresado`, { method: "POST" });
+    cargar();
+  } catch (e) {
+    evento.target.disabled = false;
+    DVU.avisar(mensaje, e.message, "error");
+  }
+};
+
+document.getElementById("filtros").onsubmit = (evento) => {
+  evento.preventDefault();
+  offset = 0;
+  cargar();
+};
+
+document.getElementById("excel").onclick = async () => {
+  // El Excel respeta el rango de fechas del filtro, no el estado: cobranza lo abre
+  // completo y filtra en la planilla, que es como trabaja hoy.
+  const p = new URLSearchParams();
+  const desde = document.getElementById("desde").value;
+  const hasta = document.getElementById("hasta").value;
+  if (desde) p.set("desde", desde);
+  if (hasta) p.set("hasta", hasta);
+  if (document.getElementById("pendientes").checked) p.set("incluir_ingresados", "false");
+  try {
+    await DVU.descargar(`/comprobantes/reporte.xlsx?${p}`, "dvu-comprobantes.xlsx");
+  } catch (e) {
+    DVU.avisar(mensaje, e.message, "error");
+  }
+};
+
+document.getElementById("anterior").onclick = () => {
+  offset = Math.max(0, offset - POR_PAGINA);
+  cargar();
+};
+document.getElementById("siguiente").onclick = () => {
+  offset += POR_PAGINA;
+  cargar();
+};
+
+DVU.proteger({ rol: ["admin"], alIngresar: cargar });
+</script>
+{% endblock %}
