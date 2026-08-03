@@ -1,0 +1,102 @@
+name: dvu
+
+x-api-base: &api-base
+  build:
+    context: ./backend
+    dockerfile: Dockerfile
+    target: runtime
+  env_file: [.env]
+  volumes:
+    - ./backend/src:/app/src:ro
+    - ./catalago:/app/catalago:ro
+    - ./data:/app/data
+  depends_on:
+    db: {condition: service_healthy}
+    redis: {condition: service_healthy}
+    minio: {condition: service_healthy}
+  restart: unless-stopped
+
+services:
+  api:
+    <<: *api-base
+    command: >
+      uvicorn dvu.api.main:app
+      --host 0.0.0.0 --port 8000
+      --proxy-headers --forwarded-allow-ips='*'
+    ports: ["${DVU_API_PORT:-8000}:8000"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health').status==200 else 1)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  worker:
+    <<: *api-base
+    command: arq dvu.workers.settings.WorkerSettings
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-dvu}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-dvu_dev_password}
+      POSTGRES_DB: ${POSTGRES_DB:-dvu}
+      # Chile: locale y timezone correctos desde la creación del cluster
+      TZ: ${DVU_TZ:-America/Santiago}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./infra/postgres/init:/docker-entrypoint-initdb.d:ro
+    ports: ["${POSTGRES_PORT_HOST:-5432}:5432"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-dvu} -d ${POSTGRES_DB:-dvu}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes
+    volumes: [redisdata:/data]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-dvu_minio}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-dvu_minio_dev_password}
+    volumes: [miniodata:/data]
+    ports:
+      - "${MINIO_PORT_HOST:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT_HOST:-9001}:9001"
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # Crea el bucket al arrancar y termina. No es un servicio de larga vida.
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      minio: {condition: service_healthy}
+    env_file: [.env]
+    entrypoint: >
+      sh -c "
+      mc alias set local http://minio:9000 $${MINIO_ROOT_USER} $${MINIO_ROOT_PASSWORD} &&
+      mc mb --ignore-existing local/$${DVU_S3_BUCKET} &&
+      echo 'bucket listo'
+      "
+    restart: "no"
+
+volumes:
+  pgdata:
+  redisdata:
+  miniodata:

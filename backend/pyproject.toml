@@ -1,0 +1,133 @@
+[project]
+name = "dvu"
+version = "0.1.0"
+description = "Sistema DVU — ecommerce B2B, app de vendedores y conciliación de pagos"
+requires-python = ">=3.12"
+dependencies = [
+    # API
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "pydantic[email]>=2.9",
+    "pydantic-settings>=2.6",
+    "python-multipart>=0.0.12",
+    # Auth
+    "pyjwt>=2.9",
+    "argon2-cffi>=23.1",
+    # Persistencia
+    "sqlalchemy>=2.0.36",
+    "alembic>=1.14",
+    "psycopg[binary,pool]>=3.2",
+    # Jobs
+    "arq>=0.26",
+    "redis>=5.2",
+    # Objetos
+    "boto3>=1.35",
+    # Extractor de catálogo (Fase 0)
+    "pdfplumber>=0.11",
+    "pymupdf>=1.24",
+    "pillow>=11.0",
+    # Utilidades
+    "httpx>=0.27",
+    "structlog>=24.4",
+    "typer>=0.15",
+    "openpyxl>=3.1",          # exportación del Excel del dueño (Fase 1)
+]
+
+[project.optional-dependencies]
+dev = [
+    "ruff>=0.8",
+    "mypy>=1.13",
+    "pytest>=8.3",
+    "pytest-cov>=6.0",
+    "pytest-asyncio>=0.24",
+    "testcontainers[postgres]>=4.8",
+    "types-boto3",
+    "types-openpyxl",
+    "pre-commit>=4.0",
+]
+
+[project.scripts]
+dvu = "dvu.cli:app"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/dvu"]
+
+# -----------------------------------------------------------------------------
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E", "W",   # pycodestyle
+    "F",        # pyflakes
+    "I",        # isort
+    "N",        # pep8-naming
+    "UP",       # pyupgrade
+    "B",        # bugbear
+    "C4",       # comprehensions
+    "SIM",      # simplify
+    "RUF",
+    "ASYNC",
+    "S",        # bandit
+]
+ignore = [
+    "E501",     # lo maneja el formatter
+    # El dominio se nombra en español (ver CLAUDE.md § Convenciones). Estas reglas
+    # asumen convenciones del inglés y no aportan aquí:
+    "N815",     # mezcla de caso en atributos de modelo
+    "N818",     # sufijo "Error" en excepciones — "RutInvalidoError" es un anglicismo
+    "N811",     # alias de constante importada (PgUUID)
+    "RUF001",   # caracteres "ambiguos" en identificadores
+    "RUF002",   # ídem en docstrings: – y × son correctos en español
+    "RUF003",   # ídem en comentarios
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101"]           # assert está bien en tests
+"alembic/**" = ["N999", "F401"]
+
+# -----------------------------------------------------------------------------
+[tool.mypy]
+python_version = "3.12"
+warn_unused_configs = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+no_implicit_optional = true
+plugins = ["pydantic.mypy"]
+
+# El dominio es lógica pura: se exige tipado estricto.
+[[tool.mypy.overrides]]
+module = "dvu.domain.*"
+strict = true
+
+[[tool.mypy.overrides]]
+module = ["pdfplumber.*", "fitz.*", "arq.*", "boto3.*"]
+ignore_missing_imports = true
+
+# -----------------------------------------------------------------------------
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-q --strict-markers --cov=dvu --cov-report=term-missing"
+asyncio_mode = "auto"
+markers = [
+    "integration: requiere servicios externos (postgres, minio)",
+    "pdf: requiere los PDF del catálogo en catalago/",
+    "slow: tarda más de unos segundos (extracción completa)",
+]
+
+[tool.coverage.report]
+fail_under = 70
+exclude_lines = ["pragma: no cover", "if TYPE_CHECKING:", "raise NotImplementedError"]
+omit = [
+    # Sólo se ejercitan con los PDF reales (tests marcados `pdf`), que no están en CI
+    # porque pesan ~380 MB. `make test-all` sí los corre.
+    "*/extractor/catalogo_pdf.py",
+    "*/extractor/imagenes.py",
+]

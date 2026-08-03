@@ -1,0 +1,340 @@
+"""Modelos SQLAlchemy — Fases 0 y 1.
+
+El detalle y la justificación de cada tabla están en docs/02-modelo-datos.md.
+"""
+
+from __future__ import annotations
+
+import uuid as uuid_lib
+from datetime import date, datetime
+from decimal import Decimal
+from typing import Any
+
+from sqlalchemy import (
+    JSON,
+    BigInteger,
+    Boolean,
+    CheckConstraint,
+    Date,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    Numeric,
+    Sequence,
+    String,
+    Text,
+    UniqueConstraint,
+)
+from sqlalchemy.dialects.postgresql import ARRAY
+from sqlalchemy.dialects.postgresql import UUID as PgUUID
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from dvu.db.base import Base, TimestampMixin, UUIDMixin, pk
+
+# =============================================================================
+# Fase 0 — catálogo
+# =============================================================================
+
+
+class CatalogoFuente(Base, TimestampMixin):
+    """Una corrida de extracción. Permite comparar ediciones del catálogo."""
+
+    __tablename__ = "catalogo_fuente"
+
+    id: Mapped[pk]
+    archivo: Mapped[str] = mapped_column(String(255), nullable=False)
+    sha256: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    edicion: Mapped[str | None] = mapped_column(String(64))
+    paginas: Mapped[int] = mapped_column(Integer, nullable=False)
+    filas_detectadas: Mapped[int] = mapped_column(Integer, default=0)
+    filas_cargables: Mapped[int] = mapped_column(Integer, default=0)
+
+    __table_args__ = (UniqueConstraint("sha256", name="uq_catalogo_fuente_sha256"),)
+
+
+class CatalogoFilaCruda(Base, TimestampMixin):
+    """Salida literal del extractor, antes de normalizar.
+
+    Es la red de seguridad: si el parseo estuvo mal, se re-normaliza desde aquí sin
+    volver a procesar 380 MB de PDF.
+    """
+
+    __tablename__ = "catalogo_fila_cruda"
+
+    id: Mapped[pk]
+    fuente_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("catalogo_fuente.id", ondelete="CASCADE"), index=True
+    )
+    pagina: Mapped[int] = mapped_column(Integer, nullable=False)
+    orden: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    # Todo `Text`: esto es la salida literal del PDF y no puede rechazar nada. Una celda
+    # mal fusionada produce cadenas largas — son justamente las que hay que conservar
+    # para diagnosticar. Los largos acotados van en `producto`, que sí es dato validado.
+    codigo_raw: Mapped[str | None] = mapped_column(Text)
+    descripcion_raw: Mapped[str | None] = mapped_column(Text)
+    venta_min_raw: Mapped[str | None] = mapped_column(Text)
+    marca_raw: Mapped[str | None] = mapped_column(Text)
+    medida_raw: Mapped[str | None] = mapped_column(Text)
+    precio_raw: Mapped[str | None] = mapped_column(Text)
+
+    confianza: Mapped[Decimal] = mapped_column(Numeric(3, 2), default=Decimal("0"))
+    problemas: Mapped[list[str]] = mapped_column(ARRAY(Text), default=list)
+    posicion: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+
+    __table_args__ = (Index("ix_fila_cruda_fuente_pagina", "fuente_id", "pagina"),)
+
+
+class Categoria(Base, TimestampMixin):
+    __tablename__ = "categoria"
+
+    id: Mapped[pk]
+    nombre: Mapped[str] = mapped_column(String(128), nullable=False)
+    slug: Mapped[str] = mapped_column(String(160), unique=True, nullable=False)
+    parent_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("categoria.id"))
+    orden: Mapped[int] = mapped_column(Integer, default=0)
+
+    hijos: Mapped[list[Categoria]] = relationship(back_populates="padre")
+    # `remote_side` va como string: `id` sólo está anotado (Mapped[pk], sin asignación),
+    # así que en el cuerpo de la clase el nombre resuelve al builtin `id`.
+    padre: Mapped[Categoria | None] = relationship(
+        back_populates="hijos", remote_side="Categoria.id"
+    )
+
+
+class Producto(Base, UUIDMixin, TimestampMixin):
+    __tablename__ = "producto"
+
+    id: Mapped[pk]
+    sku: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    descripcion: Mapped[str] = mapped_column(Text, nullable=False)
+    categoria_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("categoria.id"))
+    marca: Mapped[str | None] = mapped_column(String(128))
+
+    medida: Mapped[str | None] = mapped_column(String(128))
+    medida_valor: Mapped[Decimal | None] = mapped_column(Numeric(12, 4))
+    medida_unidad: Mapped[str | None] = mapped_column(String(16))
+
+    # Regla de negocio central: DVU vende por caja, no por unidad suelta.
+    unidad_venta: Mapped[str] = mapped_column(String(16), default="UNID", nullable=False)
+    multiplo_venta: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    envase: Mapped[str | None] = mapped_column(String(32))
+
+    precio_lista_clp: Mapped[Decimal] = mapped_column(Numeric(12, 0), nullable=False)
+    imagen_key: Mapped[str | None] = mapped_column(String(255))
+
+    activo: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+    alias: Mapped[list[ProductoAlias]] = relationship(
+        back_populates="producto", cascade="all, delete-orphan"
+    )
+
+    __table_args__ = (
+        CheckConstraint("multiplo_venta >= 1", name="ck_producto_multiplo_positivo"),
+        CheckConstraint("precio_lista_clp >= 0", name="ck_producto_precio_no_negativo"),
+        Index(
+            "ix_producto_descripcion_trgm",
+            "descripcion",
+            postgresql_using="gin",
+            postgresql_ops={"descripcion": "gin_trgm_ops"},
+        ),
+    )
+
+
+class ProductoAlias(Base, TimestampMixin):
+    """Códigos de proveedor. El vendedor busca por el que tenga a mano."""
+
+    __tablename__ = "producto_alias"
+
+    id: Mapped[pk]
+    producto_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("producto.id", ondelete="CASCADE"), index=True
+    )
+    codigo: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    origen: Mapped[str] = mapped_column(String(64), nullable=False)
+
+    producto: Mapped[Producto] = relationship(back_populates="alias")
+
+    __table_args__ = (UniqueConstraint("codigo", "origen", name="uq_alias_codigo_origen"),)
+
+
+# =============================================================================
+# Fase 1 — operación
+# =============================================================================
+
+
+class Usuario(Base, UUIDMixin, TimestampMixin):
+    __tablename__ = "usuario"
+
+    id: Mapped[pk]
+    email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
+    password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    nombre: Mapped[str] = mapped_column(String(160), nullable=False)
+    rol: Mapped[str] = mapped_column(String(16), nullable=False)
+    activo: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+    __table_args__ = (
+        CheckConstraint("rol IN ('vendedor','cliente','bodega','admin')", name="ck_usuario_rol"),
+    )
+
+
+class Cliente(Base, UUIDMixin, TimestampMixin):
+    """La ferretería que compra."""
+
+    __tablename__ = "cliente"
+
+    id: Mapped[pk]
+    rut: Mapped[str] = mapped_column(String(16), unique=True, nullable=False)
+    razon_social: Mapped[str] = mapped_column(String(255), nullable=False)
+    nombre_fantasia: Mapped[str | None] = mapped_column(String(255))
+    giro: Mapped[str | None] = mapped_column(String(255))
+
+    direccion: Mapped[str | None] = mapped_column(String(255))
+    comuna: Mapped[str | None] = mapped_column(String(128))
+    ciudad: Mapped[str | None] = mapped_column(String(128))
+    email_dte: Mapped[str | None] = mapped_column(String(255))
+    telefono: Mapped[str | None] = mapped_column(String(32))
+
+    vendedor_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("usuario.id"))
+    condicion_pago: Mapped[str] = mapped_column(String(32), default="contado", nullable=False)
+    activo: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+
+#: Folios de pedido. Declarada en el metadata para que `create_all` (tests) y Alembic
+#: (migración f842a1b09129) coincidan. Se consume desde dvu.db.numeracion.
+pedido_numero_seq = Sequence("pedido_numero_seq", metadata=Base.metadata)
+
+
+class Pedido(Base, UUIDMixin, TimestampMixin):
+    __tablename__ = "pedido"
+
+    id: Mapped[pk]
+    #: Generado por la app offline. Clave de idempotencia: el mismo pedido reenviado
+    #: tras recuperar señal no se duplica.
+    client_uuid: Mapped[uuid_lib.UUID] = mapped_column(
+        PgUUID(as_uuid=True), unique=True, nullable=False, index=True
+    )
+    numero: Mapped[str] = mapped_column(String(24), unique=True, nullable=False)
+
+    cliente_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("cliente.id"), index=True)
+    vendedor_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("usuario.id"))
+    origen: Mapped[str] = mapped_column(String(24), nullable=False)
+    estado: Mapped[str] = mapped_column(String(24), nullable=False, index=True)
+
+    neto_clp: Mapped[Decimal] = mapped_column(Numeric(12, 0), default=0)
+    iva_clp: Mapped[Decimal] = mapped_column(Numeric(12, 0), default=0)
+    total_clp: Mapped[Decimal] = mapped_column(Numeric(12, 0), default=0)
+
+    observaciones: Mapped[str | None] = mapped_column(Text)
+    creado_en_dispositivo: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    sincronizado_en: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    cliente: Mapped[Cliente] = relationship()
+    vendedor: Mapped[Usuario | None] = relationship()
+    lineas: Mapped[list[PedidoLinea]] = relationship(
+        back_populates="pedido", cascade="all, delete-orphan"
+    )
+    eventos: Mapped[list[PedidoEvento]] = relationship(
+        back_populates="pedido", cascade="all, delete-orphan"
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "origen IN ('app_vendedor','web_cliente','admin')", name="ck_pedido_origen"
+        ),
+    )
+
+
+class PedidoLinea(Base, TimestampMixin):
+    """Precio y descripción quedan **congelados**: un pedido de hace seis meses debe
+    seguir siendo legible y auditable aunque el catálogo haya cambiado."""
+
+    __tablename__ = "pedido_linea"
+
+    id: Mapped[pk]
+    pedido_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("pedido.id", ondelete="CASCADE"), index=True
+    )
+    producto_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("producto.id"))
+
+    sku: Mapped[str] = mapped_column(String(64), nullable=False)
+    descripcion: Mapped[str] = mapped_column(Text, nullable=False)
+    multiplo_venta: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    cantidad: Mapped[int] = mapped_column(Integer, nullable=False)
+    precio_unitario_clp: Mapped[Decimal] = mapped_column(Numeric(12, 0), nullable=False)
+    total_linea_clp: Mapped[Decimal] = mapped_column(Numeric(12, 0), nullable=False)
+
+    pedido: Mapped[Pedido] = relationship(back_populates="lineas")
+
+    __table_args__ = (CheckConstraint("cantidad > 0", name="ck_linea_cantidad_positiva"),)
+
+
+class PedidoEvento(Base):
+    """Bitácora de la máquina de estados. Es la fuente del seguimiento que ve el cliente."""
+
+    __tablename__ = "pedido_evento"
+
+    id: Mapped[pk]
+    pedido_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("pedido.id", ondelete="CASCADE"), index=True
+    )
+    estado_anterior: Mapped[str | None] = mapped_column(String(24))
+    estado_nuevo: Mapped[str] = mapped_column(String(24), nullable=False)
+    usuario_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("usuario.id"))
+    motivo: Mapped[str | None] = mapped_column(Text)
+    creado_en: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    pedido: Mapped[Pedido] = relationship(back_populates="eventos")
+
+
+class Pago(Base, UUIDMixin, TimestampMixin):
+    __tablename__ = "pago"
+
+    id: Mapped[pk]
+    cliente_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("cliente.id"), index=True)
+    monto_clp: Mapped[Decimal] = mapped_column(Numeric(12, 0), nullable=False)
+    fecha_pago: Mapped[date] = mapped_column(Date, nullable=False)
+    metodo: Mapped[str] = mapped_column(String(24), nullable=False)
+    referencia: Mapped[str | None] = mapped_column(String(128))
+    comprobante_key: Mapped[str | None] = mapped_column(String(255))
+
+    #: declarado -> verificado | rechazado | pendiente_revision.
+    #: Un pago que no matchea nunca se descarta: queda para la bandeja de excepciones.
+    estado: Mapped[str] = mapped_column(String(24), default="declarado", nullable=False, index=True)
+
+    registrado_por: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("usuario.id"))
+    verificado_por: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("usuario.id"))
+
+    cliente: Mapped[Cliente] = relationship()
+    aplicaciones: Mapped[list[PagoAplicacion]] = relationship(
+        back_populates="pago", cascade="all, delete-orphan"
+    )
+
+    __table_args__ = (
+        CheckConstraint("monto_clp > 0", name="ck_pago_monto_positivo"),
+        CheckConstraint(
+            "estado IN ('declarado','verificado','rechazado','pendiente_revision')",
+            name="ck_pago_estado",
+        ),
+    )
+
+
+class PagoAplicacion(Base, TimestampMixin):
+    """Un pago puede cubrir varios pedidos: el caso real de "transferí una vez para
+    pagar tres facturas"."""
+
+    __tablename__ = "pago_aplicacion"
+
+    id: Mapped[pk]
+    pago_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("pago.id", ondelete="CASCADE"), index=True
+    )
+    pedido_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("pedido.id"), index=True)
+    monto_clp: Mapped[Decimal] = mapped_column(Numeric(12, 0), nullable=False)
+
+    pago: Mapped[Pago] = relationship(back_populates="aplicaciones")
+    pedido: Mapped[Pedido] = relationship()
+
+    __table_args__ = (UniqueConstraint("pago_id", "pedido_id", name="uq_pago_pedido"),)
