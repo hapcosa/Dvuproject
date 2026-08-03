@@ -11,6 +11,8 @@ asistida y seguimiento del pedido hasta la entrega.
 - **Plan por fases:** [`docs/00-plan-maestro.md`](docs/00-plan-maestro.md)
 - **Arquitectura:** [`docs/01-arquitectura.md`](docs/01-arquitectura.md)
 - **Modelo de datos:** [`docs/02-modelo-datos.md`](docs/02-modelo-datos.md)
+- **Puesta en marcha paso a paso:** [`docs/03-puesta-en-marcha.md`](docs/03-puesta-en-marcha.md)
+- **Qué necesitamos de DVU:** [`docs/04-que-necesitamos-de-dvu.md`](docs/04-que-necesitamos-de-dvu.md)
 - **Decisiones:** [`docs/adr/`](docs/adr/)
 - **Contexto para agentes:** [`CLAUDE.md`](CLAUDE.md)
 
