@@ -131,3 +131,10 @@ make cartola-demo  # cartola de prueba para ensayar la conciliación sin agregad
   errores de parseo. No los inventes.
 - Chile: RUT con dígito verificador. Validar siempre con módulo 11, guardar normalizado
   sin puntos y con guion (`76123456-7`).
+- El **signo `$` es una palabra suelta** que cae justo sobre la frontera
+  `medida`/`precio` (centro 536.9–547.9 pt, frontera en 545.0). Clasificado por posición
+  se pegaba a la medida en el 76% de los casos: 231 filas quedaron con `medida = "$"`.
+  Por eso `columna_de_palabra()` clasifica **por contenido** los tokens que son sólo
+  signos peso. En algunas páginas viene duplicado (`"$$"`): los regex de precio aceptan
+  `\$*`, no `\$?`. Mover la frontera X no sirve — las medidas legítimas llegan a 532.3 y
+  el margen es de 4 pt.

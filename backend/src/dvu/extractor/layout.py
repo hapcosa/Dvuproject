@@ -93,11 +93,29 @@ class Celda:
         return min(abs(y - self.top), abs(y - self.bottom))
 
 
+#: El signo peso viene como palabra suelta, y su centro cae justo sobre la frontera
+#: `medida`/`precio` (536.9–547.9 pt medidos sobre el PDF real, frontera en 545.0).
+#: Por posición, tres de cada cuatro terminaban pegados a la medida: por eso en la
+#: base hay 226 productos con `medida` = "$". Un "$" nunca es una medida, así que se
+#: clasifica por contenido y no por X.
+#: Hay páginas donde el signo viene duplicado ("$$"): el rótulo "PRECIO" del encabezado
+#: y el de la fila se superponen en el original de CorelDRAW.
+_SIGNOS_PESO = "$＄﹩"
+
+
 def columna_de(x_centro: float) -> Columna | None:
     for col, (x0, x1) in RANGOS_X.items():
         if x0 <= x_centro < x1:
             return col
     return None
+
+
+def columna_de_palabra(p: Palabra) -> Columna | None:
+    """Columna a la que pertenece una palabra: por contenido si es inequívoco, si no por X."""
+    texto = p.texto.strip()
+    if texto and not texto.strip(_SIGNOS_PESO):
+        return "precio"
+    return columna_de(p.centro_x)
 
 
 def inicio_de_datos(palabras: list[Palabra]) -> float:
@@ -117,7 +135,7 @@ def agrupar_en_celdas(palabras: list[Palabra]) -> dict[Columna, list[Celda]]:
     """Agrupa palabras por columna y las fusiona en celdas verticalmente contiguas."""
     por_columna: dict[Columna, list[Palabra]] = {c: [] for c in RANGOS_X}
     for p in palabras:
-        if (col := columna_de(p.centro_x)) is not None:
+        if (col := columna_de_palabra(p)) is not None:
             por_columna[col].append(p)
 
     celdas: dict[Columna, list[Celda]] = {}
