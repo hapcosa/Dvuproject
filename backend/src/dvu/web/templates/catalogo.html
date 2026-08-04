@@ -1,13 +1,19 @@
 {% extends "base.html" %}
 
 {% block contenido %}
-<header class="banda">
+{# La banda de imprenta se pide a la API; si todavía no está extraída queda la dibujada
+   en CSS, que es la que se ve antes de la primera carga del catálogo. #}
+<header class="banda" id="banda">
   <span class="folio" id="folio">1</span>
   <div>
     <h1>CATALOGO<span class="sub">FERRETERIA</span></h1>
   </div>
   <span class="logo">D</span>
 </header>
+
+{# Portada, ofertas y contraportada: son las páginas del catálogo que son arte, no tabla.
+   No se redibujan, se muestran las de imprenta. #}
+<div class="portadas" id="portadas" hidden></div>
 
 <form class="buscador" id="buscador">
   <input type="search" id="q" name="q" placeholder="Buscar: «codo media», «cerradura», o el código del proveedor (PR/49573, KM521…)" aria-label="Buscar en el catálogo">
@@ -44,6 +50,20 @@
   <span id="rango"></span>
   <button class="plano" id="siguiente">Siguiente ›</button>
 </div>
+
+{# La foto del catálogo impreso es chica y en la ferretería se discute sobre ella: acá se
+   ve en grande y con la ficha al lado, que es lo que hoy se pregunta por WhatsApp. #}
+<dialog class="ficha" id="ficha">
+  <header>
+    <h2 id="ficha-titulo"></h2>
+    <button class="cerrar" id="ficha-cerrar" aria-label="Cerrar">×</button>
+  </header>
+  <div class="cuerpo">
+    <div class="grande" id="ficha-imagen"></div>
+    <dl id="ficha-datos"></dl>
+  </div>
+  <p class="pie" id="ficha-pie"></p>
+</dialog>
 {% endblock %}
 
 {% block script %}
@@ -56,6 +76,9 @@ let categoria = "";
 
 const filas = document.getElementById("filas");
 const mensaje = document.getElementById("mensaje");
+/** Los productos de la página que se está viendo, por SKU: la ficha los lee de acá y no
+ *  vuelve a pedirlos al servidor. */
+const enPantalla = new Map();
 
 /** Venta mínima tal como la lee el vendedor en el PDF: "7 X CAJA", "X 12 UNID". */
 function ventaMinima(p) {
@@ -64,22 +87,38 @@ function ventaMinima(p) {
   return DVU.escapar(`${p.multiplo_venta} X ${envase}`);
 }
 
+function urlImagen(sku) {
+  return `${API}/productos/${encodeURIComponent(sku)}/imagen`;
+}
+
+/** La marca del impreso es el logo del proveedor. Si no hay logo se escribe el nombre
+ *  —los productos que carga el administrador no vienen del PDF— y si no hay ninguno de
+ *  los dos se marca el hueco en vez de inventarlo. */
+function celdaMarca(p) {
+  if (p.marca_logo_key) {
+    return `<img class="logo-marca" loading="lazy" alt="${DVU.escapar(p.marca || "")}"
+                 src="${API}/productos/${encodeURIComponent(p.sku)}/marca">`;
+  }
+  return DVU.oVacio(p.marca);
+}
+
 function dibujar(pagina) {
+  enPantalla.clear();
   if (!pagina.items.length) {
     filas.innerHTML = '<tr><td colspan="7">Sin resultados para esa búsqueda.</td></tr>';
   } else {
+    pagina.items.forEach((p) => enPantalla.set(p.sku, p));
     filas.innerHTML = pagina.items.map((p) => `
-      <tr>
+      <tr data-sku="${DVU.escapar(p.sku)}">
         <td class="col-codigo">${DVU.escapar(p.codigos_proveedor[0] || p.sku)}</td>
         <td class="col-imagen">${
           p.imagen_key
-            ? `<img class="miniatura" loading="lazy" alt=""
-                    src="${API}/productos/${encodeURIComponent(p.sku)}/imagen">`
+            ? `<img class="miniatura" loading="lazy" alt="" src="${urlImagen(p.sku)}">`
             : '<div class="sin-imagen">sin foto</div>'
         }</td>
         <td class="col-desc">${DVU.escapar(p.descripcion)}</td>
         <td class="col-venta">${ventaMinima(p)}</td>
-        <td class="col-marca">${DVU.oVacio(p.marca)}</td>
+        <td class="col-marca">${celdaMarca(p)}</td>
         <td class="col-medida">${DVU.oVacio(p.medida)}</td>
         <td class="col-precio">${DVU.pesos(p.precio_lista_clp)}</td>
       </tr>`).join("");
@@ -93,6 +132,8 @@ function dibujar(pagina) {
   document.getElementById("folio").textContent = Math.floor(offset / POR_PAGINA) + 1;
   document.getElementById("anterior").disabled = offset === 0;
   document.getElementById("siguiente").disabled = hasta >= pagina.total;
+  // El logo se espeja con la paridad del folio, así que la banda cambia al pasar página.
+  ponerBanda();
 }
 
 async function cargar() {
@@ -174,7 +215,145 @@ async function cargarCategorias() {
   } catch { /* sin categorías queda sólo la búsqueda por texto, que es la de hoy */ }
 }
 
+/* --- la banda y las páginas de arte del catálogo impreso ------------------ */
+
+/** De qué lado tiene el logo cada variante de la banda. Lo mide el servidor sobre la
+ *  imagen: las dos se recortan de páginas cualesquiera del PDF y no hay garantía de que
+ *  la par sea la del logo a la izquierda. */
+let ladoDelLogo = {};
+
+/** Reemplaza la banda dibujada en CSS por la de imprenta, si está cargada.
+ *
+ *  El logo DVU va espejado según la página sea par o impar, igual que en el pliego, y el
+ *  folio se pone del lado contrario para no montarse encima. */
+function ponerBanda() {
+  const folioActual = Number(document.getElementById("folio").textContent) || 1;
+  const paridad = folioActual % 2 === 0 ? "par" : "impar";
+  const banda = document.getElementById("banda");
+
+  const imagen = new Image();
+  imagen.alt = "CATALOGO FERRETERIA — Comercial DVU SpA";
+  imagen.onload = () => {
+    banda.querySelector("img")?.remove();
+    banda.prepend(imagen);
+    banda.classList.add("impresa");
+    banda.classList.toggle("logo-izquierda", ladoDelLogo[paridad] === true);
+  };
+  // Sin banda cargada (404) queda la de CSS y no se avisa nada: no es un error del
+  // usuario, es que todavía no se corrió la extracción de plantilla.
+  imagen.src = `${API}/catalogo/banner/${paridad}`;
+}
+
+async function cargarBandas() {
+  try {
+    const bandas = await DVU.pedir("/catalogo/bandas");
+    bandas.forEach((b) => { ladoDelLogo[b.paridad] = b.logo_a_la_izquierda; });
+  } catch { /* queda la banda de CSS */ }
+  ponerBanda();
+}
+
+/** La portada y las páginas de oferta, tal como salieron de imprenta. */
+async function cargarPortadas() {
+  let paginas;
+  try {
+    paginas = await DVU.pedir("/catalogo/paginas");
+  } catch { return; }
+  if (!paginas.length) return;
+
+  const tira = document.getElementById("portadas");
+  const rotulo = { portada: "Portada", contraportada: "Contraportada", promocion: "Oferta" };
+  tira.innerHTML = paginas.map((p) => `
+    <figure data-pagina="${p.id}" data-rotulo="${DVU.escapar(rotulo[p.tipo] || p.tipo)}">
+      <img loading="lazy" alt="${DVU.escapar(rotulo[p.tipo] || p.tipo)} — página ${p.pagina}"
+           src="${API}/catalogo/paginas/${p.id}/imagen">
+      <figcaption>${DVU.escapar(rotulo[p.tipo] || p.tipo)} · pág. ${p.pagina}</figcaption>
+    </figure>`).join("");
+  tira.hidden = false;
+
+  tira.onclick = (evento) => {
+    const figura = evento.target.closest("figure");
+    if (figura) {
+      abrirImagen(
+        `${API}/catalogo/paginas/${figura.dataset.pagina}/imagen`,
+        figura.dataset.rotulo,
+        "",
+      );
+    }
+  };
+}
+
+/* --- ficha del producto en grande ---------------------------------------- */
+
+const ficha = document.getElementById("ficha");
+
+function dato(rotulo, valor) {
+  return `<dt>${DVU.escapar(rotulo)}</dt><dd>${valor}</dd>`;
+}
+
+/** Muestra una imagen sola: sirve para la portada y para las páginas de oferta. */
+function abrirImagen(url, titulo, pie) {
+  document.getElementById("ficha-titulo").textContent = titulo;
+  document.getElementById("ficha-imagen").innerHTML =
+    `<img src="${url}" alt="${DVU.escapar(titulo)}">`;
+  document.getElementById("ficha-datos").innerHTML = "";
+  document.getElementById("ficha-pie").textContent = pie;
+  ficha.showModal();
+}
+
+/** La ficha del producto: la foto en grande y al lado lo que hace falta para pedirlo.
+ *
+ *  El múltiplo de venta va destacado porque es la regla que más se rompe: DVU vende por
+ *  caja y un pedido de 5 unidades de algo que va de a 12 no se puede despachar. */
+async function abrirFicha(sku) {
+  // Si el producto no está en la página que se ve —se llegó por enlace directo— se pide.
+  let p = enPantalla.get(sku);
+  if (!p) {
+    try {
+      p = await DVU.pedir(`/productos/${encodeURIComponent(sku)}`);
+    } catch { return; }
+  }
+
+  // El enlace queda en la barra: es lo que hoy se manda por WhatsApp como «este es».
+  history.replaceState(null, "", `#p=${encodeURIComponent(sku)}`);
+  document.getElementById("ficha-titulo").textContent = p.descripcion;
+  document.getElementById("ficha-imagen").innerHTML = p.imagen_key
+    ? `<img src="${urlImagen(p.sku)}" alt="${DVU.escapar(p.descripcion)}">`
+    : '<div class="sin-imagen">sin foto</div>';
+
+  const codigos = p.codigos_proveedor.length ? p.codigos_proveedor : [p.sku];
+  document.getElementById("ficha-datos").innerHTML = [
+    dato("Precio", `<span class="precio">${DVU.pesos(p.precio_lista_clp)}</span>`),
+    dato("Venta mínima", ventaMinima(p)),
+    dato("Código proveedor", codigos.map(DVU.escapar).join("<br>")),
+    dato("SKU interno", DVU.escapar(p.sku)),
+    dato("Marca", celdaMarca(p)),
+    dato("Medida", DVU.oVacio(p.medida)),
+    dato("Categoría", DVU.oVacio(p.categoria_nombre)),
+  ].join("");
+  document.getElementById("ficha-datos").querySelector("dd").classList.add("precio");
+  document.getElementById("ficha-pie").textContent =
+    p.multiplo_venta > 1
+      ? `Se vende de a ${p.multiplo_venta} ${p.envase || p.unidad_venta}: el pedido tiene que ser múltiplo de esa cantidad.`
+      : "Precio neto, no incluye IVA.";
+  ficha.showModal();
+}
+
+filas.onclick = (evento) => {
+  const fila = evento.target.closest("tr[data-sku]");
+  if (fila) abrirFicha(fila.dataset.sku);
+};
+document.getElementById("ficha-cerrar").onclick = () => ficha.close();
+// Clic fuera del contenido: el `dialog` recibe el clic del backdrop.
+ficha.onclick = (evento) => { if (evento.target === ficha) ficha.close(); };
+ficha.onclose = () => history.replaceState(null, "", location.pathname + location.search);
+
+// `#p=SKU` abre la ficha directo: es el enlace que el vendedor manda por WhatsApp.
+const enlace = new URLSearchParams(location.hash.slice(1)).get("p");
+if (enlace) abrirFicha(enlace);
+
 cargarCategorias();
+cargarBandas();
+cargarPortadas();
 document.getElementById("anterior").onclick = () => {
   offset = Math.max(0, offset - POR_PAGINA);
   cargar();

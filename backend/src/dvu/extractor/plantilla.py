@@ -23,6 +23,7 @@ from __future__ import annotations
 import hashlib
 from collections.abc import Callable
 from dataclasses import dataclass
+from io import BytesIO
 from pathlib import Path
 
 import fitz  # PyMuPDF
@@ -189,6 +190,34 @@ def _primera_racha(predicado: Callable[[int], bool], alto: int) -> tuple[int, in
 def _es_rojo(pixel: tuple[int, ...]) -> bool:
     rojo, verde, azul = pixel[0], pixel[1], pixel[2]
     return rojo > azul + 30 and rojo > verde + 30
+
+
+def logo_a_la_izquierda(banda: bytes) -> bool:
+    """¿De qué lado de la banda está el logo DVU? Del lado donde deja de ser roja.
+
+    El logo es azul y blanco sobre el degradado, así que la mitad con más píxeles no
+    rojos es la que lo tiene. Se mide en vez de fijarlo porque las dos variantes se
+    recortan de páginas cualesquiera y no siempre salen en el mismo orden.
+
+    Lo usan el generador de PDF y la web para poner el folio del lado contrario, que es
+    donde va en el impreso.
+    """
+    from PIL import Image as PilImage
+
+    with PilImage.open(BytesIO(banda)) as imagen:
+        chica = imagen.convert("RGB").resize((80, 20))
+
+    # Los bytes vienen por filas, tres por píxel: el índice módulo el ancho da la columna.
+    crudo = chica.tobytes()
+    izquierda = derecha = 0
+    for indice in range(80 * 20):
+        if _es_rojo(tuple(crudo[indice * 3 : indice * 3 + 3])):
+            continue
+        if indice % 80 < 40:
+            izquierda += 1
+        else:
+            derecha += 1
+    return izquierda > derecha
 
 
 def extraer_marcas(pdf: Path, destino: Path, *, hasta_pagina: int | None = None) -> list[LogoMarca]:

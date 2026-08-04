@@ -53,6 +53,9 @@ class ProductoOut(BaseModel):
     envase: str | None
     precio_lista_clp: int
     imagen_key: str | None
+    #: En el catálogo impreso la marca es el logo del proveedor, no su nombre escrito:
+    #: por eso `marca` viene casi siempre vacía y esto casi siempre lleno.
+    marca_logo_key: str | None = None
     #: `None` es un valor legítimo: hay familias del catálogo sin regla de clasificación
     #: y no se les inventa una. Siguen apareciendo en la búsqueda por texto.
     categoria_slug: str | None = None
@@ -168,6 +171,19 @@ def imagen(sku: str, session: SessionDep, almacen: AlmacenDep) -> RedirectRespon
     if producto.imagen_key is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail=f"{sku} no tiene imagen")
     return RedirectResponse(almacen.url_firmada(producto.imagen_key), status_code=307)
+
+
+@router.get("/{sku}/marca")
+def logo_de_marca(sku: str, session: SessionDep, almacen: AlmacenDep) -> RedirectResponse:
+    """Redirige al logo del proveedor recortado del catálogo impreso.
+
+    Va como endpoint propio y no como URL firmada dentro del listado porque la firma dura
+    cinco minutos y la página del catálogo se deja abierta toda la mañana en el mesón.
+    """
+    producto = _buscar(session, sku)
+    if producto.marca_logo_key is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail=f"{sku} no tiene logo de marca")
+    return RedirectResponse(almacen.url_firmada(producto.marca_logo_key), status_code=307)
 
 
 @router.post("", response_model=ProductoOut, status_code=status.HTTP_201_CREATED)

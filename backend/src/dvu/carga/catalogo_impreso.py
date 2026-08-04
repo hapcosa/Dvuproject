@@ -43,6 +43,7 @@ from sqlalchemy.orm import Session, selectinload
 from dvu.almacenamiento import Almacen
 from dvu.db.models import CatalogoActivo, CatalogoPagina, Categoria, Producto
 from dvu.extractor.layout import RANGOS_X
+from dvu.extractor.plantilla import logo_a_la_izquierda
 
 #: Muestreados sobre el PDF de imprenta, no elegidos a ojo: la grilla es #ED1C23 y la
 #: fila de encabezados #2D58A7.
@@ -325,34 +326,12 @@ def _bajar_bandas(session: Session, almacen: Almacen, destino: Path) -> dict[int
             continue
         with PilImage.open(ruta) as img:
             proporcion = img.height / img.width
-            izquierda = _logo_a_la_izquierda(img)
         bandas[paridad] = Banda(
             ruta=ruta,
             alto=(ANCHO - 2 * MARGEN) * proporcion,
-            logo_a_la_izquierda=izquierda,
+            logo_a_la_izquierda=logo_a_la_izquierda(ruta.read_bytes()),
         )
     return bandas
-
-
-def _logo_a_la_izquierda(imagen: Any) -> bool:
-    """¿De qué lado está el logo? Del lado donde la banda deja de ser roja.
-
-    El logo DVU es azul y blanco sobre el degradado rojo, así que la mitad con más
-    píxeles no rojos es la que lo tiene. Se mide en vez de fijarlo porque las dos
-    variantes salen de páginas cualesquiera del PDF y no siempre en el mismo orden.
-    """
-    chica = imagen.convert("RGB").resize((80, 20))
-    izquierda = derecha = 0
-    for x in range(80):
-        for y in range(20):
-            rojo, verde, azul = chica.getpixel((x, y))
-            if rojo > azul + 30 and rojo > verde + 30:
-                continue
-            if x < 40:
-                izquierda += 1
-            else:
-                derecha += 1
-    return izquierda > derecha
 
 
 def _celda_imagen(producto: Producto, rutas: dict[str, Path]) -> Any:

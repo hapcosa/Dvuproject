@@ -12,6 +12,7 @@ from fastapi.staticfiles import StaticFiles
 
 from dvu.api.routers import (
     auth,
+    catalogo,
     categorias,
     clientes,
     comprobantes,
@@ -68,6 +69,7 @@ def create_app() -> FastAPI:
         auth.router,
         clientes.router,
         categorias.router,
+        catalogo.router,
         productos.router,
         pedidos.router,
         pagos.router,

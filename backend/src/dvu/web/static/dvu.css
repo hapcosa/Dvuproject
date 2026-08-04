@@ -8,8 +8,10 @@
 :root {
   --rojo: #c8102e;
   --rojo-oscuro: #7d0a1c;
-  --rojo-borde: #d21f33;
-  --azul: #1a4f9c;
+  /* Muestreados sobre el PDF de imprenta, no elegidos a ojo: la grilla es #ED1C23 y la
+   * fila de encabezados #2D58A7. Los mismos que usa el generador de PDF. */
+  --rojo-borde: #ed1c23;
+  --azul: #2d58a7;
   --azul-oscuro: #123a75;
   --tinta: #1f2937;
   --gris: #6b7280;
@@ -61,7 +63,31 @@ body {
 .nav .sep { flex: 1; }
 .nav .sesion { color: #bfdbfe; font-size: 12px; }
 
-/* --- banda roja del catálogo (calcada del PDF) --------------------------- */
+/* --- banda roja del catálogo -------------------------------------------- */
+
+/* Cuando la banda de imprenta está cargada (`/catalogo/banner/…`), la web usa **esa**
+ * imagen: el degradado y el logo DVU son de CorelDRAW y cualquier imitación en CSS se
+ * nota. Lo de abajo es el respaldo para antes de la primera extracción. */
+.banda.impresa {
+  height: auto;
+  border: 0;
+  background: none;
+}
+.banda.impresa img {
+  display: block;
+  width: 100%;
+}
+/* Con la banda real el rótulo y el logo dibujados sobran: ya están en la imagen. */
+.banda.impresa h1,
+.banda.impresa .logo { display: none; }
+/* El folio va del lado contrario al logo, como en el impreso. */
+.banda.impresa .folio {
+  top: 26%;
+  color: #fff;
+  font-size: 20px;
+  text-shadow: 0 1px 2px rgb(0 0 0 / 45%);
+}
+.banda.impresa.logo-izquierda .folio { left: auto; right: 20px; }
 
 .banda {
   position: relative;
@@ -182,6 +208,116 @@ table.catalogo tbody tr:hover { background: #fff7f8; }
   border: 1px dashed var(--gris-borde);
   color: #9ca3af;
   font-size: 10px;
+}
+
+/* La marca del impreso es el logo del proveedor, no su nombre escrito. */
+.logo-marca {
+  max-width: 92px;
+  max-height: 28px;
+  object-fit: contain;
+  display: block;
+  margin: 0 auto;
+}
+
+/* La foto abre la ficha: se marca que es clickeable o nadie la toca. */
+.miniatura, .logo-marca { cursor: zoom-in; }
+
+/* --- páginas de arte del catálogo (portada, ofertas, contraportada) ------ */
+
+.portadas {
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  padding: 12px 0 4px;
+}
+.portadas figure {
+  margin: 0;
+  flex: 0 0 auto;
+  cursor: zoom-in;
+}
+.portadas img {
+  display: block;
+  width: 108px;
+  border: 1px solid var(--gris-borde);
+  background: var(--papel);
+  box-shadow: var(--sombra);
+}
+.portadas figcaption {
+  font-size: 11px;
+  color: var(--gris);
+  text-align: center;
+  padding-top: 4px;
+}
+
+/* --- ficha del producto en grande --------------------------------------- */
+
+dialog.ficha {
+  border: 0;
+  border-radius: 8px;
+  padding: 0;
+  width: min(880px, 94vw);
+  box-shadow: 0 10px 40px rgb(0 0 0 / 35%);
+}
+dialog.ficha::backdrop { background: rgb(0 0 0 / 55%); }
+dialog.ficha header {
+  background: var(--azul);
+  color: #fff;
+  padding: 10px 16px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+dialog.ficha header h2 { margin: 0; font-size: 16px; flex: 1; }
+dialog.ficha .cerrar {
+  background: none;
+  border: 0;
+  color: #fff;
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 6px;
+  border-radius: 4px;
+}
+/* El `dialog` le da el foco al primer botón al abrirse: sin esto el anillo del navegador
+ * queda encima del rótulo y parece un error de maqueta. */
+dialog.ficha .cerrar:focus-visible { outline: 2px solid #fff; outline-offset: 1px; }
+dialog.ficha .cerrar:focus:not(:focus-visible) { outline: none; }
+dialog.ficha .cerrar:hover { background: rgb(255 255 255 / 18%); }
+dialog.ficha .cuerpo {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px;
+  padding: 16px;
+  background: var(--papel);
+}
+dialog.ficha .grande {
+  flex: 1 1 320px;
+  min-height: 260px;
+  display: grid;
+  place-items: center;
+  background: #fbfbfb;
+  border: 1px solid var(--gris-borde);
+}
+dialog.ficha .grande img { max-width: 100%; max-height: 62vh; }
+dialog.ficha dl {
+  flex: 1 1 280px;
+  margin: 0;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px 14px;
+  align-content: start;
+  font-size: 13px;
+}
+dialog.ficha dt { color: var(--gris); }
+dialog.ficha dd { margin: 0; font-weight: 600; }
+dialog.ficha dd.precio { color: var(--rojo); font-size: 20px; }
+dialog.ficha dd img { max-height: 26px; }
+dialog.ficha .pie {
+  padding: 10px 16px;
+  border-top: 1px solid var(--gris-borde);
+  background: #fafafa;
+  font-size: 12px;
+  color: var(--gris);
 }
 
 /* En la tabla de edición la foto es una referencia, no el producto: va más chica y
