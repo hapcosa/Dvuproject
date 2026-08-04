@@ -8,10 +8,12 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from dvu.api.routers import (
     auth,
     clientes,
+    comprobantes,
     conciliacion,
     dte,
     health,
@@ -21,6 +23,7 @@ from dvu.api.routers import (
     reportes,
 )
 from dvu.config import get_settings
+from dvu.web import router as web
 
 log = logging.getLogger("dvu")
 
@@ -66,11 +69,16 @@ def create_app() -> FastAPI:
         productos.router,
         pedidos.router,
         pagos.router,
+        comprobantes.router,
         conciliacion.router,
         dte.router,
         reportes.router,
     ):
         app.include_router(router, prefix=cfg.api_prefix)
+
+    # Prototipo web. Va montado al final para que ninguna de sus rutas tape la API.
+    app.mount("/estatico", StaticFiles(directory=str(web.RAIZ / "static")), name="estatico")
+    app.include_router(web.router)
     return app
 
 

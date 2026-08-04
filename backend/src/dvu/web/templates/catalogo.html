@@ -1,0 +1,132 @@
+{% extends "base.html" %}
+
+{% block contenido %}
+<header class="banda">
+  <span class="folio" id="folio">1</span>
+  <div>
+    <h1>CATALOGO<span class="sub">FERRETERIA</span></h1>
+  </div>
+  <span class="logo">D</span>
+</header>
+
+<form class="buscador" id="buscador">
+  <input type="search" id="q" name="q" placeholder="Buscar: «codo media», «cerradura», o el código del proveedor (PR/49573, KM521…)" aria-label="Buscar en el catálogo">
+  <button type="submit">Buscar</button>
+  <button type="button" class="plano" id="limpiar">Limpiar</button>
+</form>
+
+<div id="mensaje" class="aviso info" hidden></div>
+
+<div class="desplazable">
+  <table class="catalogo">
+    <thead>
+      <tr>
+        <th class="col-codigo">Código</th>
+        <th class="col-imagen">Imagen</th>
+        <th class="col-desc">Descripción</th>
+        <th class="col-venta">Detalle<small>Venta Min</small></th>
+        <th class="col-marca">Marca</th>
+        <th class="col-medida">Medida</th>
+        <th class="col-precio">Precio</th>
+      </tr>
+    </thead>
+    <tbody id="filas">
+      <tr><td colspan="7">Cargando…</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<div class="paginacion">
+  <button class="plano" id="anterior">‹ Anterior</button>
+  <span id="rango"></span>
+  <button class="plano" id="siguiente">Siguiente ›</button>
+</div>
+{% endblock %}
+
+{% block script %}
+<script>
+const POR_PAGINA = 25;
+const API = document.querySelector('meta[name="dvu-api"]').content;
+let offset = 0;
+let consulta = "";
+
+const filas = document.getElementById("filas");
+const mensaje = document.getElementById("mensaje");
+
+/** Venta mínima tal como la lee el vendedor en el PDF: "7 X CAJA", "X 12 UNID". */
+function ventaMinima(p) {
+  if (p.multiplo_venta <= 1 && !p.envase) return '<span class="vacio">—</span>';
+  const envase = p.envase || p.unidad_venta || "UNID";
+  return DVU.escapar(`${p.multiplo_venta} X ${envase}`);
+}
+
+function dibujar(pagina) {
+  if (!pagina.items.length) {
+    filas.innerHTML = '<tr><td colspan="7">Sin resultados para esa búsqueda.</td></tr>';
+  } else {
+    filas.innerHTML = pagina.items.map((p) => `
+      <tr>
+        <td class="col-codigo">${DVU.escapar(p.codigos_proveedor[0] || p.sku)}</td>
+        <td class="col-imagen">${
+          p.imagen_key
+            ? `<img class="miniatura" loading="lazy" alt=""
+                    src="${API}/productos/${encodeURIComponent(p.sku)}/imagen">`
+            : '<div class="sin-imagen">sin foto</div>'
+        }</td>
+        <td class="col-desc">${DVU.escapar(p.descripcion)}</td>
+        <td class="col-venta">${ventaMinima(p)}</td>
+        <td class="col-marca">${DVU.oVacio(p.marca)}</td>
+        <td class="col-medida">${DVU.oVacio(p.medida)}</td>
+        <td class="col-precio">${DVU.pesos(p.precio_lista_clp)}</td>
+      </tr>`).join("");
+  }
+
+  const desde = pagina.total ? offset + 1 : 0;
+  const hasta = Math.min(offset + POR_PAGINA, pagina.total);
+  document.getElementById("rango").textContent =
+    `${desde}–${hasta} de ${pagina.total.toLocaleString("es-CL")} productos`;
+  // El folio imita la numeración de página del PDF impreso.
+  document.getElementById("folio").textContent = Math.floor(offset / POR_PAGINA) + 1;
+  document.getElementById("anterior").disabled = offset === 0;
+  document.getElementById("siguiente").disabled = hasta >= pagina.total;
+}
+
+async function cargar() {
+  mensaje.hidden = true;
+  filas.innerHTML = '<tr><td colspan="7">Cargando…</td></tr>';
+  const parametros = new URLSearchParams({ limite: POR_PAGINA, offset });
+  if (consulta) parametros.set("q", consulta);
+  try {
+    dibujar(await DVU.pedir(`/productos?${parametros}`));
+  } catch (e) {
+    filas.innerHTML = "";
+    DVU.avisar(mensaje, e.message, "error");
+  }
+}
+
+document.getElementById("buscador").onsubmit = (evento) => {
+  evento.preventDefault();
+  consulta = document.getElementById("q").value.trim();
+  offset = 0;
+  cargar();
+};
+document.getElementById("limpiar").onclick = () => {
+  document.getElementById("q").value = "";
+  consulta = "";
+  offset = 0;
+  cargar();
+};
+document.getElementById("anterior").onclick = () => {
+  offset = Math.max(0, offset - POR_PAGINA);
+  cargar();
+  scrollTo({ top: 0, behavior: "smooth" });
+};
+document.getElementById("siguiente").onclick = () => {
+  offset += POR_PAGINA;
+  cargar();
+  scrollTo({ top: 0, behavior: "smooth" });
+};
+
+cargar();
+</script>
+{% endblock %}

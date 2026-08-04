@@ -50,7 +50,8 @@ make seed                 # usuarios y clientes de ejemplo
 ```
 
 La API queda en <http://localhost:8000>, con documentación en `/docs` (deshabilitada en
-producción) y readiness en `/health/ready`.
+producción) y readiness en `/health/ready`. En la misma dirección está el
+[prototipo web](#prototipo-web): catálogo en `/`, carga de comprobantes en `/vendedor`.
 
 Todas las integraciones externas —banco, pagos, DTE, WhatsApp— vienen en modo `fake` por
 defecto, así que el stack levanta completo sin credenciales de terceros.
@@ -100,6 +101,14 @@ Todo cuelga de `/api/v1`.
 | `GET` | `/pagos` | cualquiera | Bandeja; `?estado=pendiente_revision` es la de excepciones |
 | `POST` | `/pagos/{uuid}/estado` | admin | Verifica, rechaza o manda a revisión |
 | `GET` | `/reportes/ventas.xlsx` | admin | El Excel del dueño, generado al vuelo |
+| `POST` | `/productos` | admin | Alta manual de lo que no viene en el PDF |
+| `PATCH` | `/productos/{sku}` | admin | Corrige la ficha; `activo=false` la desactiva |
+| `POST` | `/productos/{sku}/alias` | admin | Suma un código de proveedor |
+| `POST` | `/comprobantes` | vendedor | Registra la transferencia avisada; nunca rechaza |
+| `POST` | `/comprobantes/{uuid}/imagen` | vendedor | Adjunta la foto del comprobante |
+| `GET` | `/comprobantes` | cualquiera | Bandeja de cobranza; el vendedor sólo ve los suyos |
+| `POST` | `/comprobantes/{uuid}/ingresado` | admin | Sale de la bandeja; la fila no se borra |
+| `GET` | `/comprobantes/reporte.xlsx` | admin | El Excel de cobranza, con los colores del bot |
 
 Dos reglas que la API impone sin excepción: el pedido rechaza cualquier cantidad que no
 sea múltiplo de la venta mínima (y responde con la `cantidad_sugerida` de **todas** las
@@ -138,6 +147,28 @@ adaptadores `fake`. Para ensayar la conciliación:
 make cartola-demo   # cartola de prueba a partir de los pagos declarados
 make conciliar
 ```
+
+## Prototipo web
+
+Cuatro páginas servidas por la misma app, en <http://localhost:8000>. Reemplazan el
+catálogo PDF y el grupo de WhatsApp «COMPROBANTES TRANSF.» — **no** cablean pagos en
+línea ni despacho.
+
+| Ruta | Quién | Para qué |
+|---|---|---|
+| `/` | cualquiera | El catálogo con el diseño del PDF impreso, con buscador |
+| `/vendedor` | vendedor | El formulario que reemplaza el mensaje de WhatsApp |
+| `/cobranza` | admin | Bandeja de comprobantes + descarga del Excel |
+| `/admin` | admin | Edita el catálogo celda por celda |
+
+Son **clientes de la API JSON**: piden el token a `/auth/login` y desde ahí llaman a los
+mismos endpoints documentados en `/docs`. No hay sesión de servidor ni datos incrustados
+en las plantillas, así que hay un solo modelo de permisos que mantener. Sin framework,
+sin build y sin CDN: se abren en cualquier navegador sin instalar nada.
+
+El vendedor puede enviar un comprobante incompleto a propósito: se guarda marcado con lo
+que falta (`FALTA MONTO`, `FALTA FACTURA`, …), con los mismos estados y colores que
+cobranza ya lee en el Excel de hoy. Perder el aviso es peor que registrarlo a medias.
 
 ## Desarrollo
 

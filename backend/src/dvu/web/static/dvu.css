@@ -1,0 +1,379 @@
+/* Catálogo DVU — sigue el diseño del PDF impreso.
+ *
+ * El vendedor y el cliente conocen esa hoja de memoria: banda roja, cabecera azul y
+ * la grilla con borde rojo. Reproducirla hace que la web se lea sin explicación.
+ * Las medidas salen del PDF real (A4, siete columnas, fila de ~78 pt).
+ */
+
+:root {
+  --rojo: #c8102e;
+  --rojo-oscuro: #7d0a1c;
+  --rojo-borde: #d21f33;
+  --azul: #1a4f9c;
+  --azul-oscuro: #123a75;
+  --tinta: #1f2937;
+  --gris: #6b7280;
+  --gris-borde: #d1d5db;
+  --fondo: #f3f4f6;
+  --papel: #ffffff;
+  --verde: #00c853;
+  --amarillo: #ffeb3b;
+  --rojo-estado: #ef5350;
+  --azul-estado: #42a5f5;
+  --sombra: 0 1px 3px rgb(0 0 0 / 12%);
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--fondo);
+  color: var(--tinta);
+  font: 14px/1.5 "Segoe UI", system-ui, -apple-system, Arial, sans-serif;
+}
+
+.hoja {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 16px;
+}
+
+/* --- navegación ---------------------------------------------------------- */
+
+.nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+  background: var(--azul-oscuro);
+  padding: 8px 16px;
+}
+.nav a {
+  color: #dbeafe;
+  text-decoration: none;
+  padding: 6px 12px;
+  border-radius: 4px;
+  font-weight: 600;
+  font-size: 13px;
+}
+.nav a:hover { background: rgb(255 255 255 / 12%); color: #fff; }
+.nav a.activo { background: var(--rojo); color: #fff; }
+.nav .sep { flex: 1; }
+.nav .sesion { color: #bfdbfe; font-size: 12px; }
+
+/* --- banda roja del catálogo (calcada del PDF) --------------------------- */
+
+.banda {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 92px;
+  color: #fff;
+  background: linear-gradient(
+    90deg,
+    var(--rojo-oscuro) 0%,
+    var(--rojo) 28%,
+    #e8203c 50%,
+    var(--rojo) 72%,
+    var(--rojo-oscuro) 100%
+  );
+  border: 2px solid var(--rojo-oscuro);
+}
+.banda h1 {
+  margin: 0;
+  font-size: 34px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  line-height: 1;
+}
+.banda .sub {
+  display: block;
+  margin-top: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 7px;
+  text-indent: 7px;
+}
+.banda .folio {
+  position: absolute;
+  left: 14px;
+  top: 10px;
+  font-size: 18px;
+  opacity: 0.85;
+}
+.banda .logo {
+  position: absolute;
+  right: 12px;
+  display: grid;
+  place-items: center;
+  width: 62px;
+  height: 62px;
+  background: var(--papel);
+  border-radius: 6px;
+  color: var(--azul);
+  font-size: 38px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+/* --- grilla del catálogo ------------------------------------------------- */
+
+.buscador {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 12px 0;
+}
+.buscador input[type="search"] { flex: 1; min-width: 220px; }
+
+table.catalogo {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--papel);
+  box-shadow: var(--sombra);
+}
+table.catalogo thead th {
+  background: var(--azul);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 8px 6px;
+  border: 1px solid var(--azul-oscuro);
+}
+table.catalogo thead th small {
+  display: block;
+  font-size: 10px;
+  font-weight: 400;
+  opacity: 0.85;
+}
+table.catalogo td {
+  border: 1px solid var(--rojo-borde);
+  padding: 8px 6px;
+  text-align: center;
+  vertical-align: middle;
+  font-size: 12px;
+}
+table.catalogo tbody tr:hover { background: #fff7f8; }
+
+.col-codigo { width: 13%; font-family: "Consolas", ui-monospace, monospace; font-size: 11px; }
+.col-imagen { width: 12%; }
+.col-desc   { width: 26%; text-transform: uppercase; }
+.col-venta  { width: 12%; font-weight: 600; }
+.col-marca  { width: 12%; }
+.col-medida { width: 10%; }
+.col-precio { width: 15%; font-weight: 700; white-space: nowrap; }
+
+.miniatura {
+  width: 76px;
+  height: 56px;
+  object-fit: contain;
+  display: block;
+  margin: 0 auto;
+}
+.sin-imagen {
+  display: grid;
+  place-items: center;
+  width: 76px;
+  height: 56px;
+  margin: 0 auto;
+  background: #f9fafb;
+  border: 1px dashed var(--gris-borde);
+  color: #9ca3af;
+  font-size: 10px;
+}
+
+/* Dato que el catálogo no trae. Se marca en vez de inventarse. */
+.vacio { color: #9ca3af; }
+
+/* --- formularios y controles -------------------------------------------- */
+
+input, select, textarea, button {
+  font: inherit;
+  color: inherit;
+}
+input, select, textarea {
+  padding: 7px 9px;
+  border: 1px solid var(--gris-borde);
+  border-radius: 4px;
+  background: var(--papel);
+  width: 100%;
+}
+input:focus, select:focus, textarea:focus {
+  outline: 2px solid var(--azul);
+  outline-offset: -1px;
+}
+textarea { min-height: 84px; resize: vertical; }
+label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--gris);
+  margin-bottom: 3px;
+}
+.campo { margin-bottom: 12px; }
+.rejilla {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+}
+
+button {
+  padding: 8px 16px;
+  border: 0;
+  border-radius: 4px;
+  background: var(--azul);
+  color: #fff;
+  font-weight: 600;
+  cursor: pointer;
+  width: auto;
+}
+button:hover { background: var(--azul-oscuro); }
+button.rojo { background: var(--rojo); }
+button.rojo:hover { background: var(--rojo-oscuro); }
+button.plano {
+  background: transparent;
+  color: var(--azul);
+  border: 1px solid var(--gris-borde);
+  padding: 5px 10px;
+  font-size: 12px;
+}
+button.plano:hover { background: #eff6ff; }
+button[disabled] { opacity: 0.55; cursor: not-allowed; }
+
+.tarjeta {
+  background: var(--papel);
+  border-radius: 6px;
+  box-shadow: var(--sombra);
+  padding: 18px;
+  margin-bottom: 16px;
+}
+.tarjeta h2 { margin: 0 0 4px; font-size: 17px; }
+.tarjeta h3 { margin: 0 0 4px; font-size: 15px; }
+.pista { margin: 0 0 16px; color: var(--gris); font-size: 13px; }
+.pista code { background: #f3f4f6; padding: 1px 4px; border-radius: 3px; }
+
+/* Filtros de la bandeja: se acomodan en una línea y bajan solos en pantalla chica. */
+.filtros {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-end;
+}
+.filtros .campo { margin-bottom: 0; min-width: 150px; }
+.filtros .casilla { display: flex; align-items: center; }
+.filtros .casilla label {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin: 0;
+  font-size: 13px;
+  color: var(--tinta);
+  white-space: nowrap;
+}
+.filtros .casilla input { width: auto; }
+.filtros .acciones { display: flex; gap: 8px; }
+.campo.ancho { grid-column: span 2; }
+
+/* --- tabla de gestión (admin y cobranza) --------------------------------- */
+
+table.datos {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--papel);
+  box-shadow: var(--sombra);
+  font-size: 13px;
+}
+table.datos th {
+  background: #1e293b;
+  color: #fff;
+  text-align: left;
+  padding: 9px 8px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+table.datos td {
+  border-bottom: 1px solid #e5e7eb;
+  padding: 7px 8px;
+  vertical-align: top;
+}
+table.datos input, table.datos select { padding: 5px 6px; font-size: 12px; }
+table.datos small { color: var(--gris); font-size: 11px; }
+table.datos code { font-size: 11px; }
+table.datos .numero { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+table.datos .observacion { max-width: 260px; }
+table.datos .codigos code {
+  background: #f3f4f6;
+  padding: 1px 4px;
+  border-radius: 3px;
+  margin-right: 2px;
+}
+/* Ya ingresado por cobranza: sigue a la vista pero apagado. No se borra nada. */
+table.datos tr.ingresado { opacity: 0.55; }
+.desplazable { overflow-x: auto; }
+
+/* Edición in situ: la celda editable se distingue del texto fijo. */
+table.editable .edit {
+  background: #fffdf5;
+  border-left: 2px solid #fde68a;
+  cursor: text;
+  min-width: 70px;
+}
+table.editable .edit:focus {
+  outline: 2px solid var(--azul);
+  background: var(--papel);
+}
+table.editable .edit.guardando { opacity: 0.5; }
+table.editable .edit.guardado { background: #dcfce7; border-left-color: var(--verde); }
+
+.pastilla {
+  display: inline-block;
+  padding: 2px 9px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #111827;
+  white-space: nowrap;
+}
+.estado-listo             { background: var(--verde); color: #003d19; }
+.estado-falta_monto,
+.estado-falta_factura,
+.estado-falta_cliente,
+.estado-falta_dato        { background: var(--amarillo); }
+.estado-duplicado_posible { background: var(--rojo-estado); color: #fff; }
+.estado-abono_parcial     { background: var(--azul-estado); color: #06305c; }
+
+.aviso {
+  padding: 10px 14px;
+  border-radius: 4px;
+  margin-bottom: 14px;
+  font-size: 13px;
+}
+.aviso.ok    { background: #dcfce7; color: #14532d; }
+.aviso.error { background: #fee2e2; color: #7f1d1d; }
+.aviso.info  { background: #dbeafe; color: #1e3a8a; }
+
+.paginacion {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: center;
+  padding: 14px 0;
+  color: var(--gris);
+  font-size: 13px;
+}
+
+.pie {
+  padding: 20px 0 32px;
+  color: var(--gris);
+  font-size: 12px;
+  text-align: center;
+}
+
+@media (max-width: 720px) {
+  .banda { height: 72px; }
+  .banda h1 { font-size: 24px; }
+  .banda .logo { width: 46px; height: 46px; font-size: 28px; }
+  table.catalogo { font-size: 11px; }
+  .col-marca, .col-medida { display: none; }
+}

@@ -441,3 +441,78 @@ class Dte(Base, UUIDMixin, TimestampMixin):
         ),
         UniqueConstraint("tipo", "folio", name="uq_dte_tipo_folio"),
     )
+
+
+# =============================================================================
+# Comprobantes declarados por el vendedor — reemplazo del grupo de WhatsApp
+# =============================================================================
+
+
+class Comprobante(Base, UUIDMixin, TimestampMixin):
+    """Una transferencia que el vendedor avisa, con su foto.
+
+    Es el registro estructurado de lo que hoy llega como mensaje suelto al grupo
+    «COMPROBANTES TRANSF.». Se guarda aunque venga incompleto: perder el aviso es peor
+    que registrarlo marcado, y el estado dice exactamente qué falta.
+
+    No es un `Pago`. El `Pago` es el hecho contable que se aplica a pedidos y se cruza
+    con la cartola; el comprobante es lo que declaró el vendedor y todavía nadie
+    verificó. Se separan a propósito: el comprobante puede estar mal y aun así tiene que
+    existir en la base, y un mismo comprobante puede terminar siendo un pago, ninguno o
+    parte de uno.
+    """
+
+    __tablename__ = "comprobante"
+
+    id: Mapped[pk]
+
+    #: Idempotencia offline-first: la app del vendedor lo genera local y reintenta.
+    #: Reenviar el mismo comprobante diez veces desde la bodega crea una sola fila.
+    client_uuid: Mapped[uuid_lib.UUID | None] = mapped_column(PgUUID(as_uuid=True), unique=True)
+
+    vendedor_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("usuario.id"), index=True)
+    #: Cliente identificado en la base, si se pudo. Nulo no es error: el vendedor puede
+    #: no saber el RUT y escribir el nombre a mano.
+    cliente_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("cliente.id"), index=True)
+    #: Lo que el vendedor escribió como cliente. Se conserva aunque haya `cliente_id`:
+    #: es la evidencia de qué dijo, y sirve para corregir el match después.
+    cliente_texto: Mapped[str] = mapped_column(String(255), default="", nullable=False)
+
+    #: Números de factura tal como los declaró. Varios: "transferí una vez por tres".
+    facturas: Mapped[list[str]] = mapped_column(ARRAY(String(16)), default=list, nullable=False)
+
+    monto_clp: Mapped[Decimal | None] = mapped_column(Numeric(12, 0))
+    banco: Mapped[str | None] = mapped_column(String(64))
+    rut_contraparte: Mapped[str | None] = mapped_column(String(16))
+    numero_operacion: Mapped[str | None] = mapped_column(String(32), index=True)
+    fecha_transferencia: Mapped[date | None] = mapped_column(Date)
+
+    #: El mensaje completo del vendedor. Es la fuente de la que salió todo lo demás y
+    #: la única forma de auditar una extracción dudosa.
+    detalle: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    #: Foto o PDF del comprobante. Trae datos bancarios: nunca se sirve público.
+    imagen_key: Mapped[str | None] = mapped_column(String(255))
+
+    #: Ver dvu.domain.comprobante.EstadoComprobante. Lo calcula el sistema al guardar.
+    estado: Mapped[str] = mapped_column(String(24), nullable=False, index=True)
+    observacion: Mapped[str] = mapped_column(Text, default="", nullable=False)
+
+    #: Cobranza ya lo ingresó al sistema contable. No se borra: se marca.
+    ingresado: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    ingresado_por: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("usuario.id"))
+
+    vendedor: Mapped[Usuario] = relationship(foreign_keys=[vendedor_id])
+    cliente: Mapped[Cliente | None] = relationship()
+
+    __table_args__ = (
+        CheckConstraint("monto_clp IS NULL OR monto_clp > 0", name="ck_comprobante_monto_positivo"),
+        CheckConstraint(
+            "estado IN ('listo','falta_monto','falta_factura','falta_cliente',"
+            "'falta_dato','duplicado_posible','abono_parcial')",
+            name="ck_comprobante_estado",
+        ),
+        Index("ix_comprobante_fecha_transferencia", "fecha_transferencia"),
+        # La bandeja de cobranza siempre ordena y filtra por fecha de registro: la de
+        # transferencia puede venir vacía y no sirve para paginar.
+        Index("ix_comprobante_creado_en", "creado_en"),
+    )
