@@ -31,7 +31,14 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from dvu.almacenamiento import Almacen
-from dvu.db.models import CatalogoFilaCruda, CatalogoFuente, Producto, ProductoAlias
+from dvu.db.models import (
+    CatalogoActivo,
+    CatalogoFilaCruda,
+    CatalogoFuente,
+    CatalogoPagina,
+    Producto,
+    ProductoAlias,
+)
 
 #: De dónde viene el código alternativo. Hoy sólo el catálogo impreso; en Fase 2
 #: convivirá con los códigos de cada proveedor.
@@ -41,12 +48,18 @@ ORIGEN_ALIAS = "catalogo_pdf"
 SUBDIR_IMAGENES = "imagenes"
 ARCHIVO_IMAGENES = "imagenes.json"
 
+#: `extraer` deja acá los activos del diseño: banda del encabezado, logos de marca y
+#: las páginas de arte recortadas del PDF original.
+SUBDIR_PLANTILLA = "plantilla"
+ARCHIVO_PLANTILLA = "plantilla.json"
+
 #: Extensión del archivo -> tipo MIME. PyMuPDF devuelve casi siempre `jpeg`.
 TIPOS_POR_EXTENSION = {
     "jpg": "image/jpeg",
     "jpeg": "image/jpeg",
     "png": "image/png",
     "webp": "image/webp",
+    "pdf": "application/pdf",
 }
 
 
@@ -60,6 +73,9 @@ class ResumenCarga:
     desactivados: int = 0
     imagenes_subidas: int = 0
     productos_con_imagen: int = 0
+    logos_subidos: int = 0
+    productos_con_marca: int = 0
+    paginas_diseno: int = 0
     #: Códigos repetidos dentro del mismo JSONL cuyos datos no coinciden. Gana el
     #: primero y el conflicto se reporta: es un error del catálogo, no de la carga.
     conflictos: list[str] = field(default_factory=list)
@@ -75,6 +91,9 @@ class ResumenCarga:
             f"  Alias creados          : {self.alias_creados}",
             f"  Imágenes subidas       : {self.imagenes_subidas}",
             f"  Productos con imagen   : {self.productos_con_imagen}",
+            f"  Logos de marca subidos : {self.logos_subidos}",
+            f"  Productos con marca    : {self.productos_con_marca}",
+            f"  Páginas de diseño      : {self.paginas_diseno}",
             f"  Productos desactivados : {self.desactivados}",
             f"  Códigos en conflicto   : {len(self.conflictos)}",
         ]
@@ -121,7 +140,8 @@ def cargar_catalogo(
     _guardar_filas_crudas(session, [*cargables, *revision], fuentes, resumen)
 
     imagenes = _subir_imagenes(directorio, almacen, resumen) if almacen else {}
-    vistos = _upsert_productos(session, cargables, resumen, imagenes)
+    marcas = _cargar_plantilla(session, directorio, almacen, resumen) if almacen else {}
+    vistos = _upsert_productos(session, cargables, resumen, imagenes, marcas)
 
     if desactivar_ausentes:
         resumen.desactivados = _desactivar_ausentes(session, vistos)
@@ -224,11 +244,80 @@ def _subir_imagenes(
     return mapa
 
 
+def _cargar_plantilla(
+    session: Session, directorio: Path, almacen: Almacen, resumen: ResumenCarga
+) -> dict[str, dict[str, str]]:
+    """Sube los activos del diseño y registra páginas de arte y banda del encabezado.
+
+    Devuelve el mapa archivo -> «pág:orden» -> key del logo de marca, que `_upsert`
+    aplica a cada producto.
+    """
+    ruta = directorio / ARCHIVO_PLANTILLA
+    if not ruta.exists():
+        return {}
+
+    datos: dict[str, dict[str, Any]] = json.loads(ruta.read_text(encoding="utf-8"))
+    origen = directorio / SUBDIR_PLANTILLA
+    subidas: set[str] = set()
+
+    def subir(key: str) -> bool:
+        """`False` si el archivo no está: se omite y el catálogo sale sin esa pieza."""
+        if key in subidas:
+            return True
+        archivo = origen / Path(key).name
+        tipo = TIPOS_POR_EXTENSION.get(archivo.suffix.lstrip(".").lower())
+        if not archivo.exists() or tipo is None:
+            return False
+        with archivo.open("rb") as fh:
+            almacen.guardar(key, fh, tipo)
+        subidas.add(key)
+        return True
+
+    activos = {a.clave: a for a in session.scalars(select(CatalogoActivo))}
+    paginas = {(p.archivo, p.pagina): p for p in session.scalars(select(CatalogoPagina))}
+    marcas: dict[str, dict[str, str]] = {}
+
+    for archivo, bloque in datos.items():
+        for paridad, key in bloque.get("banners", {}).items():
+            if not subir(key):
+                continue
+            clave = f"banner_{paridad}"
+            activo = activos.get(clave)
+            if activo is None:
+                activo = CatalogoActivo(clave=clave, key_objeto=key)
+                session.add(activo)
+                activos[clave] = activo
+            activo.key_objeto = key
+
+        for info in bloque.get("paginas", []):
+            if not (subir(info["key_pdf"]) and subir(info["key_png"])):
+                continue
+            pagina = paginas.get((archivo, info["pagina"]))
+            if pagina is None:
+                pagina = CatalogoPagina(archivo=archivo, pagina=info["pagina"])
+                session.add(pagina)
+                paginas[(archivo, info["pagina"])] = pagina
+            pagina.tipo = info["tipo"]
+            pagina.key_pdf = info["key_pdf"]
+            pagina.key_png = info["key_png"]
+            resumen.paginas_diseno += 1
+
+        asignaciones = dict(bloque.get("marcas", {}))
+        for posicion, key in list(asignaciones.items()):
+            if not subir(key):
+                del asignaciones[posicion]
+        marcas[archivo] = asignaciones
+
+    resumen.logos_subidos = sum(1 for k in subidas if k.startswith("catalogo/marcas/"))
+    return marcas
+
+
 def _upsert_productos(
     session: Session,
     registros: list[dict[str, Any]],
     resumen: ResumenCarga,
     imagenes: dict[str, dict[str, str]],
+    marcas: dict[str, dict[str, str]],
 ) -> set[str]:
     """Devuelve los SKU vistos en esta carga."""
     existentes = {p.sku: p for p in session.scalars(select(Producto))}
@@ -260,6 +349,11 @@ def _upsert_productos(
         if key is not None:
             producto.imagen_key = key
             resumen.productos_con_imagen += 1
+
+        logo = marcas.get(reg["archivo"], {}).get(f"{reg['pagina']}:{reg['orden']}")
+        if logo is not None:
+            producto.marca_logo_key = logo
+            resumen.productos_con_marca += 1
 
         clave = (reg["codigo"], ORIGEN_ALIAS)
         if clave not in alias_existentes:

@@ -21,6 +21,12 @@ from dvu.config import get_settings
 from dvu.db.session import get_sessionmaker
 from dvu.extractor.catalogo_pdf import ResultadoExtraccion, extraer_pdf, iter_pdfs
 from dvu.extractor.imagenes import asociar_a_filas, extraer_imagenes
+from dvu.extractor.plantilla import (
+    asociar_marcas_a_filas,
+    extraer_banners,
+    extraer_marcas,
+    extraer_paginas_diseno,
+)
 from dvu.extractor.reporte import escribir_salidas
 from dvu.integraciones.banco import ErrorBanco
 
@@ -57,6 +63,7 @@ def extraer(
 
     if con_imagenes:
         _extraer_imagenes(pdfs, resultados, destino, hasta_pagina)
+    _extraer_plantilla(pdfs, resultados, destino, hasta_pagina)
 
     typer.echo(reporte.resumen())
     typer.echo(f"  Salidas en {destino}")
@@ -91,6 +98,59 @@ def _extraer_imagenes(
 
     (destino / "imagenes.json").write_text(
         json.dumps(asociaciones, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+
+
+def _extraer_plantilla(
+    pdfs: list[Path],
+    resultados: list[ResultadoExtraccion],
+    destino: Path,
+    hasta_pagina: int | None,
+) -> None:
+    """Activos del diseño: banda del encabezado, logos de marca y páginas de arte.
+
+    Va aparte de `--con-imagenes` porque no son fotos de producto sino la maqueta, y sin
+    ella lo que se emite es una planilla de precios, no el catálogo de DVU.
+    """
+    dir_plantilla = destino / "plantilla"
+    salida: dict[str, dict[str, object]] = {}
+
+    for pdf, resultado in zip(pdfs, resultados, strict=True):
+        typer.echo(f"Plantilla de {pdf.name} …")
+        con_filas = {fila.pagina for fila in resultado.filas}
+
+        banners = extraer_banners(pdf, dir_plantilla, con_filas)
+        logos = extraer_marcas(pdf, dir_plantilla, hasta_pagina=hasta_pagina)
+
+        filas_por_pagina: dict[int, list[tuple[int, float]]] = {}
+        for fila in resultado.filas:
+            filas_por_pagina.setdefault(fila.pagina, []).append((fila.orden, fila.y_centro))
+        marcas = asociar_marcas_a_filas(logos, filas_por_pagina)
+
+        paginas = extraer_paginas_diseno(
+            pdf, dir_plantilla, con_filas, hasta_pagina=hasta_pagina
+        )
+
+        salida[pdf.name] = {
+            "banners": banners,
+            "marcas": {f"{p}:{o}": key for (p, o), key in marcas.items()},
+            "paginas": [
+                {
+                    "pagina": pag.pagina,
+                    "tipo": pag.tipo,
+                    "key_pdf": pag.key_pdf,
+                    "key_png": pag.key_png,
+                }
+                for pag in paginas
+            ],
+        }
+        typer.echo(
+            f"  {len({logo.key for logo in logos})} logos de marca, "
+            f"{len(marcas)} filas con marca, {len(paginas)} páginas de diseño"
+        )
+
+    (destino / "plantilla.json").write_text(
+        json.dumps(salida, ensure_ascii=False, indent=2), encoding="utf-8"
     )
 
 

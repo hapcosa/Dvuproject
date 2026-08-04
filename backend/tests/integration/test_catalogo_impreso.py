@@ -19,7 +19,13 @@ from sqlalchemy.orm import Session
 
 from dvu.carga.catalogo_impreso import exportar_catalogo_pdf, formatear_clp
 from dvu.carga.categorias import clasificar_catalogo
-from dvu.db.models import Producto, ProductoAlias, Usuario
+from dvu.db.models import (
+    CatalogoActivo,
+    CatalogoPagina,
+    Producto,
+    ProductoAlias,
+    Usuario,
+)
 from dvu.seguridad import emitir_token, hashear
 
 pytestmark = pytest.mark.integration
@@ -209,7 +215,9 @@ def test_cada_pagina_repite_el_encabezado(
     with fitz.open(stream=exportar_catalogo_pdf(sesion, almacen), filetype="pdf") as doc:
         primera = doc[0].get_text()
 
-    assert "CATÁLOGO DVU" in primera
+    # Sin banda guardada en el almacén se dibuja la de respaldo, con los rótulos del
+    # impreso. Con banda real el texto va dentro de la imagen y no se puede buscar acá.
+    assert "CATALOGO" in primera
     assert "Precio" in primera
     assert "no incluyen IVA" in primera  # el precio de lista es neto y hay que decirlo
 
@@ -247,3 +255,124 @@ def test_el_precio_va_en_pesos_sin_decimales(monto: int, esperado: str) -> None:
     """CLP entero, con punto de miles. Un decimal en un precio delata un float en alguna
     capa, y eso está prohibido en todo el sistema."""
     assert formatear_clp(monto) == esperado
+
+
+def _banda(logo_a_la_izquierda: bool) -> bytes:
+    """Una banda como la extraída del impreso: roja, con el logo de un solo lado.
+
+    El lado se detecta midiendo dónde la banda deja de ser roja, así que acá se pinta un
+    bloque blanco en la mitad que corresponde.
+    """
+    from PIL import Image as PilImage
+
+    imagen = PilImage.new("RGB", (600, 70), "red")
+    x = 0 if logo_a_la_izquierda else 400
+    imagen.paste(PilImage.new("RGB", (200, 70), "white"), (x, 0))
+    buffer = BytesIO()
+    imagen.save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
+def _pdf_de_una_pagina(texto: str) -> bytes:
+    doc = fitz.open()
+    doc.new_page(width=595, height=842).insert_text((80, 200), texto, fontsize=28)
+    datos: bytes = doc.tobytes()
+    doc.close()
+    return datos
+
+
+@pytest.fixture
+def plantilla(sesion: Session, almacen: AlmacenDeMentira) -> None:
+    """Los activos que deja el extractor: las dos bandas y una portada."""
+    for clave, izquierda in (("banner_par", True), ("banner_impar", False)):
+        key = f"catalogo/plantilla/{clave}.png"
+        almacen.guardar(key, BytesIO(_banda(izquierda)), "image/png")
+        sesion.add(CatalogoActivo(clave=clave, key_objeto=key))
+
+    almacen.guardar(
+        "catalogo/paginas/portada.pdf",
+        BytesIO(_pdf_de_una_pagina("PORTADA DVU")),
+        "application/pdf",
+    )
+    almacen.guardar("catalogo/paginas/portada.png", BytesIO(_png("blue")), "image/png")
+    sesion.add(
+        CatalogoPagina(
+            archivo="CAT.pdf",
+            pagina=1,
+            tipo="portada",
+            key_pdf="catalogo/paginas/portada.pdf",
+            key_png="catalogo/paginas/portada.png",
+        )
+    )
+    sesion.flush()
+
+
+def test_la_banda_del_impreso_reemplaza_a_la_dibujada_a_mano(
+    sesion: Session, almacen: AlmacenDeMentira, datos: dict[str, Any], plantilla: None
+) -> None:
+    """Con la banda original guardada, el encabezado es la del catálogo, no una imitación.
+
+    Es lo que le da identidad a la página: el degradado rojo y el logo DVU son de
+    imprenta y no se pueden redibujar con un rectángulo.
+    """
+    pdf = exportar_catalogo_pdf(sesion, almacen)
+
+    assert "CATALOGO\nFERRETERIA" not in _texto(pdf)  # la banda de respaldo ya no aparece
+    with fitz.open(stream=pdf, filetype="pdf") as doc:
+        cuerpo = doc[1]  # la 0 es la portada pegada
+        arriba = [b for b in cuerpo.get_image_info() if b["bbox"][1] < 20]
+    assert arriba, "la banda tiene que estar dibujada al tope de la página"
+
+
+def test_el_folio_va_del_lado_contrario_al_logo(
+    sesion: Session, almacen: AlmacenDeMentira, datos: dict[str, Any], plantilla: None
+) -> None:
+    """Como en el impreso: el número de página no se monta sobre el logo."""
+    with fitz.open(stream=exportar_catalogo_pdf(sesion, almacen), filetype="pdf") as doc:
+        pagina = doc[1]
+        # "2" porque la portada pegada corre la numeración: el folio es la página física.
+        folios = [p for p in pagina.get_text("words") if p[4] == "2" and p[3] < 40]
+
+    assert folios, "falta el folio en la banda"
+    # Página par -> banner_par, que tiene el logo a la izquierda: el folio va a la derecha.
+    assert folios[0][0] > 400
+
+
+def test_la_portada_original_se_pega_tal_cual(
+    sesion: Session, almacen: AlmacenDeMentira, datos: dict[str, Any], plantilla: None
+) -> None:
+    """No se redibuja: es la página de imprenta, copiada como PDF y no como imagen."""
+    with fitz.open(stream=exportar_catalogo_pdf(sesion, almacen), filetype="pdf") as doc:
+        assert "PORTADA DVU" in doc[0].get_text()
+        assert doc.page_count >= 2
+
+
+def test_la_lista_de_precios_no_lleva_portada(
+    sesion: Session, almacen: AlmacenDeMentira, datos: dict[str, Any], plantilla: None
+) -> None:
+    """Sin fotos es una lista de precios para mandar por WhatsApp: la portada del
+    catálogo ilustrado ahí confunde sobre lo que es, y pesa."""
+    with fitz.open(
+        stream=exportar_catalogo_pdf(sesion, almacen, con_imagenes=False), filetype="pdf"
+    ) as doc:
+        assert "PORTADA DVU" not in doc[0].get_text()
+
+
+def test_la_marca_sale_como_logo_y_no_como_texto(
+    sesion: Session, almacen: AlmacenDeMentira, datos: dict[str, Any]
+) -> None:
+    """En el impreso la marca es el PNG del proveedor. Si está el logo, se usa el logo."""
+    almacen.guardar("catalogo/marcas/vinilit.png", BytesIO(_png("green")), "image/png")
+    producto = sesion.query(Producto).filter_by(sku="DVU-CODO").one()
+    producto.marca_logo_key = "catalogo/marcas/vinilit.png"
+    sesion.flush()
+
+    assert "VINILIT" not in _texto(exportar_catalogo_pdf(sesion, almacen))
+
+
+def test_sin_logo_la_marca_cae_al_nombre_escrito(
+    sesion: Session, almacen: AlmacenDeMentira, datos: dict[str, Any]
+) -> None:
+    """Un producto cargado a mano por el administrador no tiene logo del PDF. Antes de
+    dejar la celda vacía se escribe la marca: el dato existe."""
+    assert "VINILIT" in _texto(exportar_catalogo_pdf(sesion, almacen))
