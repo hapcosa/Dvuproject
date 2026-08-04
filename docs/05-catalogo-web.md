@@ -79,6 +79,39 @@ de memoria; reproducirla hace que la web se lea sin explicación.
 Los datos que el catálogo original no trae —marca vacía, venta mínima vacía— se marcan
 con `—`, nunca se inventan. Son datos faltantes reales.
 
+## Las fotos
+
+Van por dos vías, y hacen falta las dos:
+
+1. **Masiva, del PDF.** `make extract` saca las fotos de la columna «Imagen» por
+   posición, descarta iconos y logos por tamaño (mínimo 120×90 px y 4 KB) y deduplica
+   por sha256. `make cargar-catalogo` las sube al almacén y les pone el `imagen_key` al
+   producto. Cada archivo se sube **una sola vez** aunque lo compartan veinte filas: el
+   catálogo trae una foto por familia de productos, no por SKU.
+2. **Individual, desde `/admin`.** `POST /productos/{sku}/imagen` reemplaza la foto de un
+   producto. Sin esto, arreglar un recorte malo obligaría a volver a correr la extracción
+   completa, que son horas, y el producto que no está impreso jamás tendría foto.
+
+Tres decisiones ahí:
+
+- **Cargar los precios no puede depender de las fotos.** Extraer imágenes es mucho más
+  lento que extraer texto, así que subirlas es un flag (`--con-imagenes`) y no un
+  requisito. Y una foto que falta en disco no aborta la carga: esa fila queda sin imagen.
+  El catálogo con una foto menos sirve; sin precios, no.
+- **Una edición nueva sin fotos no borra las viejas.** Mejor la foto del catálogo
+  anterior que un hueco en la grilla.
+- **La foto manual acepta menos formatos que el comprobante.** El comprobante toma PDF y
+  HEIC porque es evidencia que hay que conservar tal como la mandó el vendedor —el banco
+  entrega PDF, el iPhone manda HEIC—. La foto de producto se pinta en un `<img>`: un PDF
+  no sirve y el HEIC no lo muestra ningún navegador. La key va por SKU, así que resubir
+  pisa la anterior en vez de acumular objetos huérfanos.
+
+Las fotos se sirven por URL firmada de vida corta, igual que los comprobantes: no porque
+tengan nada reservado —son las mismas que están impresas— sino porque el bucket es uno
+solo y no se abre al público por comodidad. **Con el almacén en disco** (sin MinIO) esa
+URL es un `file://` que el navegador no carga: para ver las fotos en la web hace falta el
+almacén S3, que `make up` levanta.
+
 ## Cómo probarlo
 
 ```bash
@@ -95,11 +128,11 @@ Después, en <http://localhost:8000>:
    BCI op 12345678»*. El monto y la factura salen solos del texto.
 3. Manda uno **sin monto** a propósito: se guarda marcado FALTA MONTO.
 4. `/cobranza` — entra como `admin@dvu.cl`, mira la bandeja y baja el Excel.
-5. `/admin` — corrige un precio haciendo clic en la celda.
+5. `/admin` — corrige un precio haciendo clic en la celda, y cambia la foto de un
+   producto con el botón «cambiar».
 
 ## Qué falta
 
-- Subir la foto del producto desde `/admin` (hoy la imagen viene del extractor del PDF).
 - Categorías: el catálogo se navega buscando, no por árbol.
 - Que el vendedor arme el pedido desde el catálogo — el backend ya lo soporta
   (`POST /pedidos`), falta la pantalla.

@@ -31,6 +31,11 @@ EXTENSIONES = {
 }
 TAMANO_MAXIMO_BYTES = 10 * 1024 * 1024
 
+#: Foto de producto del catálogo. Más estrecho que el comprobante a propósito: esto se
+#: pinta en un `<img>` del catálogo, así que un PDF no sirve y HEIC no lo muestra ningún
+#: navegador —lo manda el iPhone tal cual, y quedaría un hueco en la grilla—.
+TIPOS_IMAGEN_PRODUCTO = frozenset({"image/jpeg", "image/png", "image/webp"})
+
 
 class TipoNoPermitido(Exception):
     pass
@@ -117,6 +122,31 @@ def validar_comprobante(content_type: str | None, tamano: int | None) -> str:
     return EXTENSIONES[content_type]
 
 
+def validar_imagen_producto(content_type: str | None, tamano: int | None) -> str:
+    """Devuelve la extensión a usar. Lanza si el archivo no sirve como foto de catálogo."""
+    if content_type not in TIPOS_IMAGEN_PRODUCTO:
+        raise TipoNoPermitido(
+            f"Tipo '{content_type}' no permitido para una foto de producto; se aceptan: "
+            + ", ".join(sorted(TIPOS_IMAGEN_PRODUCTO))
+        )
+    if tamano is not None and tamano > TAMANO_MAXIMO_BYTES:
+        raise ArchivoDemasiadoGrande(
+            f"La imagen pesa {tamano} bytes; el máximo es {TAMANO_MAXIMO_BYTES}"
+        )
+    return EXTENSIONES[content_type]
+
+
 def key_comprobante(pago_uuid: uuid_lib.UUID, extension: str) -> str:
     """Los comprobantes van bajo su propio prefijo: no se sirven junto al catálogo."""
     return f"comprobantes/{pago_uuid}.{extension}"
+
+
+def key_imagen_producto(sku: str, extension: str) -> str:
+    """Foto subida a mano, bajo el mismo prefijo que las que salen del PDF.
+
+    Va por SKU y no por hash: resubir la foto de un producto pisa la anterior en vez de
+    ir dejando objetos huérfanos en el bucket (salvo que cambie el formato, caso en que
+    el archivo viejo queda ahí sin que nadie lo referencie). Las del extractor sí van
+    por hash, porque allá un mismo archivo sirve a varias filas.
+    """
+    return f"catalogo/{sku}.{extension}"

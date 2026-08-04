@@ -102,8 +102,8 @@ extract-dry: ## Extrae solo las 6 primeras páginas, sin imágenes (iteración r
 	$(COMPOSE) run --rm api python -m dvu.cli extraer --hasta-pagina 6
 
 .PHONY: cargar-catalogo
-cargar-catalogo: ## Carga el resultado de la extracción a la BD
-	$(COMPOSE) run --rm api python -m dvu.cli cargar-catalogo
+cargar-catalogo: ## Carga el resultado de la extracción a la BD, con las fotos
+	$(COMPOSE) run --rm api python -m dvu.cli cargar-catalogo --con-imagenes
 
 # --- Fase 2: conciliación y DTE ----------------------------------------------
 .PHONY: conciliar

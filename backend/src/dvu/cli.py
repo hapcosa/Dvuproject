@@ -9,6 +9,7 @@ from typing import Annotated
 
 import typer
 
+from dvu.almacenamiento import get_almacen
 from dvu.carga.cartola import cartola_de_prueba
 from dvu.carga.catalogo import cargar_catalogo
 from dvu.carga.excel import exportar_excel
@@ -104,6 +105,13 @@ def cargar_catalogo_cmd(
             "(sólo con el catálogo completo)",
         ),
     ] = False,
+    con_imagenes: Annotated[
+        bool,
+        typer.Option(
+            "--con-imagenes",
+            help="Sube al almacén las fotos de `extraer --con-imagenes` y las asocia",
+        ),
+    ] = False,
 ) -> None:
     """Fase 0 — carga el JSONL extraído a producto / producto_alias."""
     cfg = get_settings()
@@ -111,7 +119,12 @@ def cargar_catalogo_cmd(
 
     with get_sessionmaker()() as session:
         try:
-            resumen = cargar_catalogo(session, origen, desactivar_ausentes=desactivar_ausentes)
+            resumen = cargar_catalogo(
+                session,
+                origen,
+                desactivar_ausentes=desactivar_ausentes,
+                almacen=get_almacen() if con_imagenes else None,
+            )
         except FileNotFoundError as exc:
             typer.secho(str(exc), fg=typer.colors.RED)
             raise typer.Exit(1) from exc

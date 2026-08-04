@@ -7,6 +7,7 @@ producto se desactiva, nunca se borra, porque está referenciado en pedidos hist
 
 from __future__ import annotations
 
+import io
 from decimal import Decimal
 from typing import Any
 
@@ -15,7 +16,10 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from dvu.almacenamiento import AlmacenLocal, get_almacen
+from dvu.api.main import create_app
 from dvu.db.models import Producto, ProductoAlias, Usuario
+from dvu.db.session import get_session
 from dvu.seguridad import emitir_token, hashear
 
 pytestmark = pytest.mark.integration
@@ -207,3 +211,89 @@ def test_el_catalogo_se_lee_sin_ingresar(cliente_api: TestClient, datos: dict[st
 
     assert r.status_code == 200
     assert r.json()["total"] == 1
+
+
+@pytest.fixture
+def cliente_api_local(sesion: Session, tmp_path: Any) -> Any:
+    """Cliente HTTP con almacén en disco: los tests no necesitan MinIO."""
+    app = create_app()
+    app.dependency_overrides[get_session] = lambda: sesion
+    app.dependency_overrides[get_almacen] = lambda: AlmacenLocal(tmp_path)
+    with TestClient(app) as cliente:
+        yield cliente
+    app.dependency_overrides.clear()
+
+
+def _foto(nombre: str = "foto.png", tipo: str = "image/png") -> dict[str, Any]:
+    return {"archivo": (nombre, io.BytesIO(b"\x89PNG datos de imagen"), tipo)}
+
+
+def test_subir_la_foto_del_producto(
+    cliente_api_local: TestClient, datos: dict[str, Any], sesion: Session
+) -> None:
+    r = cliente_api_local.post(
+        f"{PREFIJO}/productos/DVU-PR49573/imagen", files=_foto(), headers=datos["auth_admin"]
+    )
+
+    assert r.status_code == 200
+    assert r.json()["imagen_key"] == "catalogo/DVU-PR49573.png"
+
+    vista = cliente_api_local.get(f"{PREFIJO}/productos/DVU-PR49573/imagen", follow_redirects=False)
+    assert vista.status_code == 307
+
+
+def test_resubir_la_foto_pisa_la_anterior(
+    cliente_api_local: TestClient, datos: dict[str, Any]
+) -> None:
+    """Reemplazar una foto mala no puede ir dejando objetos huérfanos en el bucket."""
+    primera = cliente_api_local.post(
+        f"{PREFIJO}/productos/DVU-PR49573/imagen", files=_foto(), headers=datos["auth_admin"]
+    ).json()
+    segunda = cliente_api_local.post(
+        f"{PREFIJO}/productos/DVU-PR49573/imagen",
+        files=_foto("otra.png"),
+        headers=datos["auth_admin"],
+    ).json()
+
+    assert primera["imagen_key"] == segunda["imagen_key"]
+
+
+def test_el_pdf_no_sirve_como_foto_de_catalogo(
+    cliente_api_local: TestClient, datos: dict[str, Any]
+) -> None:
+    """El comprobante sí acepta PDF; la foto del catálogo va en un `<img>` y no."""
+    r = cliente_api_local.post(
+        f"{PREFIJO}/productos/DVU-PR49573/imagen",
+        files=_foto("catalogo.pdf", "application/pdf"),
+        headers=datos["auth_admin"],
+    )
+
+    assert r.status_code == 415
+
+
+def test_el_vendedor_no_cambia_las_fotos(
+    cliente_api_local: TestClient, datos: dict[str, Any]
+) -> None:
+    r = cliente_api_local.post(
+        f"{PREFIJO}/productos/DVU-PR49573/imagen", files=_foto(), headers=datos["auth_vendedor"]
+    )
+
+    assert r.status_code == 403
+
+
+def test_subir_la_foto_de_un_sku_que_no_existe(
+    cliente_api_local: TestClient, datos: dict[str, Any]
+) -> None:
+    r = cliente_api_local.post(
+        f"{PREFIJO}/productos/NO-EXISTE/imagen", files=_foto(), headers=datos["auth_admin"]
+    )
+
+    assert r.status_code == 404
+
+
+def test_producto_sin_foto_responde_404_no_una_imagen_rota(
+    cliente_api_local: TestClient, datos: dict[str, Any]
+) -> None:
+    r = cliente_api_local.get(f"{PREFIJO}/productos/DVU-PR49573/imagen", follow_redirects=False)
+
+    assert r.status_code == 404

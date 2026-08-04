@@ -13,14 +13,21 @@ from __future__ import annotations
 import uuid as uuid_lib
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
-from dvu.almacenamiento import Almacen, get_almacen
+from dvu.almacenamiento import (
+    Almacen,
+    ArchivoDemasiadoGrande,
+    TipoNoPermitido,
+    get_almacen,
+    key_imagen_producto,
+    validar_imagen_producto,
+)
 from dvu.api.deps import exige_rol
 from dvu.db.models import Producto, ProductoAlias, Usuario
 from dvu.db.session import get_session
@@ -168,6 +175,38 @@ def crear(entrada: ProductoEntrada, session: SessionDep, usuario: AdminDep) -> P
         raise HTTPException(
             status.HTTP_409_CONFLICT, detail=f"Ya existe un producto con SKU {entrada.sku}"
         ) from exc
+    return _a_salida(producto)
+
+
+@router.post("/{sku}/imagen", response_model=ProductoOut)
+def subir_imagen(
+    sku: str,
+    session: SessionDep,
+    usuario: AdminDep,
+    almacen: AlmacenDep,
+    archivo: Annotated[UploadFile, File(description="Foto del producto")],
+) -> ProductoOut:
+    """Reemplaza la foto del producto.
+
+    La vía masiva sigue siendo el PDF (`cargar-catalogo --con-imagenes`). Esto es para
+    el producto que no está impreso y para cuando el recorte del extractor salió mal:
+    sin esto, una foto equivocada sólo se arregla volviendo a correr la extracción
+    completa, que son varias horas.
+    """
+    producto = _buscar(session, sku)
+    try:
+        extension = validar_imagen_producto(archivo.content_type, archivo.size)
+    except TipoNoPermitido as exc:
+        raise HTTPException(status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, detail=str(exc)) from exc
+    except ArchivoDemasiadoGrande as exc:
+        raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail=str(exc)) from exc
+
+    producto.imagen_key = almacen.guardar(
+        key_imagen_producto(producto.sku, extension),
+        archivo.file,
+        archivo.content_type or "application/octet-stream",
+    )
+    session.flush()
     return _a_salida(producto)
 
 

@@ -57,11 +57,11 @@ defecto, así que el stack levanta completo sin credenciales de terceros.
 ## Cargar el catálogo
 
 ```bash
-make extract              # catalago/*.pdf -> data/extraccion/*.jsonl + reporte
-make cargar-catalogo      # data/extraccion -> producto, producto_alias
+make extract              # catalago/*.pdf -> data/extraccion/*.jsonl + fotos + reporte
+make cargar-catalogo      # data/extraccion -> producto, producto_alias, fotos al almacén
 ```
 
-`make extract` deja cuatro archivos en `data/extraccion/`:
+`make extract` deja esto en `data/extraccion/`:
 
 | Archivo | Contenido |
 |---|---|
@@ -69,6 +69,15 @@ make cargar-catalogo      # data/extraccion -> producto, producto_alias
 | `revision.jsonl` | Filas que necesitan intervención humana, con su diagnóstico |
 | `reporte.json` | Métricas de calidad y verificación del criterio de Fase 0 |
 | `fuentes.json` | sha256 y páginas de cada PDF, para trazar la carga |
+| `imagenes/` + `imagenes.json` | Las fotos de producto y a qué fila va cada una |
+
+Las fotos salen del PDF por posición: se toma lo que cae en la columna «Imagen», se
+descartan iconos y logos por tamaño, y se deduplica por sha256 —una misma foto sirve a
+toda una familia de productos, no a un SKU—. `cargar-catalogo --con-imagenes` las sube
+al almacén y les pone el `imagen_key` al producto; sin ese flag la carga es sólo texto,
+porque extraer las imágenes es una corrida mucho más lenta y cargar los precios no puede
+depender de ella. Una foto que falte en disco no aborta la carga: esa fila queda sin
+imagen y el resto entra igual.
 
 La carga es **idempotente**: repetirla con el mismo JSONL deja la base igual. Nada se
 borra —los productos ausentes de una edición se marcan inactivos con
@@ -102,6 +111,8 @@ Todo cuelga de `/api/v1`.
 | `POST` | `/productos` | admin | Alta manual de lo que no viene en el PDF |
 | `PATCH` | `/productos/{sku}` | admin | Corrige la ficha; `activo=false` la desactiva |
 | `POST` | `/productos/{sku}/alias` | admin | Suma un código de proveedor |
+| `POST` | `/productos/{sku}/imagen` | admin | Reemplaza la foto; sólo JPEG, PNG o WebP |
+| `GET` | `/productos/{sku}/imagen` | cualquiera | Redirige a una URL firmada de vida corta |
 | `POST` | `/comprobantes` | vendedor | Registra la transferencia avisada; nunca rechaza |
 | `POST` | `/comprobantes/{uuid}/imagen` | vendedor | Adjunta la foto del comprobante |
 | `GET` | `/comprobantes` | cualquiera | Bandeja de cobranza; el vendedor sólo ve los suyos |
@@ -157,7 +168,7 @@ línea ni despacho.
 | `/` | cualquiera | El catálogo con el diseño del PDF impreso, con buscador |
 | `/vendedor` | vendedor | El formulario que reemplaza el mensaje de WhatsApp |
 | `/cobranza` | admin | Bandeja de comprobantes + descarga del Excel |
-| `/admin` | admin | Edita el catálogo celda por celda |
+| `/admin` | admin | Edita el catálogo celda por celda y cambia las fotos |
 
 Son **clientes de la API JSON**: piden el token a `/auth/login` y desde ahí llaman a los
 mismos endpoints documentados en `/docs`. No hay sesión de servidor ni datos incrustados
