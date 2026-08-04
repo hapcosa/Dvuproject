@@ -129,6 +129,9 @@ class Producto(Base, UUIDMixin, TimestampMixin):
     alias: Mapped[list[ProductoAlias]] = relationship(
         back_populates="producto", cascade="all, delete-orphan"
     )
+    # `selectin` y no `select`: el catálogo se lista de a 50 filas y cada una muestra su
+    # categoría. La tabla tiene diez filas, así que es una consulta más, no cincuenta.
+    categoria: Mapped[Categoria | None] = relationship(lazy="selectin")
 
     __table_args__ = (
         CheckConstraint("multiplo_venta >= 1", name="ck_producto_multiplo_positivo"),

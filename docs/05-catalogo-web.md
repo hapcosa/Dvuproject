@@ -112,28 +112,82 @@ solo y no se abre al público por comodidad. **Con el almacén en disco** (sin M
 URL es un `file://` que el navegador no carga: para ver las fotos en la web hace falta el
 almacén S3, que `make up` levanta.
 
+## Las categorías
+
+**El PDF no las trae.** Se verificó con pdfplumber sobre páginas reales: arriba de la
+zona de datos sólo hay el folio y los títulos de columna. No hay encabezado de sección
+que extraer, así que no había forma de sacar el árbol del original.
+
+El árbol se define a mano en `dvu/domain/categorias.py` —diez categorías con sus palabras
+clave— y `make clasificar` lo aplica sobre la descripción. Sobre el catálogo real:
+**1.448 de 1.975 productos clasificados, 73 %**.
+
+Decisiones que sostienen eso:
+
+- **Lo que ninguna regla reconoce queda sin categoría.** El 27 % restante no recibe una
+  categoría aproximada. Una categoría inventada es peor que ninguna: el vendedor navega
+  el árbol, no encuentra lo que sabe que existe y deja de confiar en el árbol entero.
+  Esos productos se siguen encontrando por texto, que es como se busca hoy.
+- **La asignación a mano manda.** La clasificación automática sólo toca productos sin
+  categoría. Si `make clasificar` pisara las correcciones del administrador, cada
+  corrección duraría hasta la próxima corrida y nadie volvería a corregir nada.
+  `--reclasificar` fuerza la pasada completa y es explícito porque destruye trabajo.
+- **Sembrar no renombra.** Si el administrador le cambió el nombre a una categoría desde
+  `/admin`, ese es el nombre que usa la fuerza de venta.
+- **Las categorías vacías no se ofrecen** (`?con_vacias=true` las trae igual, para
+  administrar). Una categoría en el menú sin productos adentro es una promesa que el
+  catálogo no cumple.
+- **No hay `DELETE`.** Igual que el resto del sistema: nada se borra.
+- **Una categoría inexistente en el filtro devuelve vacío, no 404.** El slug llega desde
+  un enlace o un marcador viejo; romper la página entera por eso no ayuda a nadie.
+
+En `/admin` el filtro «— Sin categoría —» es exactamente la bandeja de revisión del
+clasificador: la lista de lo que falta asignar a mano.
+
+## El pedido desde el catálogo
+
+`/pedido` reemplaza el mensaje de WhatsApp con el pedido: busca en el catálogo (por
+texto o por categoría), arma el carrito, elige el cliente de su cartera y envía.
+
+- Las cantidades se escriben **en envases**, no en unidades. El vendedor pone «2 cajas» y
+  la página envía `2 × multiplo_venta`: la cantidad es múltiplo válido por construcción y
+  no hay forma de tipear un número que el backend vaya a rechazar.
+- El carrito vive en `sessionStorage` con un `client_uuid` que **no se regenera entre
+  intentos** —sólo tras un envío exitoso o al vaciarlo—. Si se corta la señal al enviar,
+  reintentar cae en la idempotencia del backend en vez de duplicar el pedido. Es el mismo
+  contrato que después va a usar la app Flutter offline-first.
+- La página **no calcula IVA**: muestra la suma neta y después los totales que devolvió
+  el servidor. La regla del impuesto vive en un solo lugar y esta página no la repite.
+
 ## Cómo probarlo
 
 ```bash
 make up
 make migrate
 make seed        # usuarios de ejemplo; nunca en producción
+make clasificar  # arma el árbol de categorías sobre el catálogo ya cargado
 ```
 
 Después, en <http://localhost:8000>:
 
-1. `/` — busca «codo» o pega un código de proveedor (`PR/49573`, `KM521`).
-2. `/vendedor` — entra como `vendedor@dvu.cl` / `dvu-dev-1234` y escribe un mensaje como
-   se lo mandarías al grupo: *«Ferretería El Martillo, abono factura 33780 por 510.459,
-   BCI op 12345678»*. El monto y la factura salen solos del texto.
-3. Manda uno **sin monto** a propósito: se guarda marcado FALTA MONTO.
-4. `/cobranza` — entra como `admin@dvu.cl`, mira la bandeja y baja el Excel.
-5. `/admin` — corrige un precio haciendo clic en la celda, y cambia la foto de un
-   producto con el botón «cambiar».
+1. `/` — busca «codo» o pega un código de proveedor (`PR/49573`, `KM521`), o filtrá por
+   categoría en el desplegable.
+2. `/pedido` — entra como `vendedor@dvu.cl` / `dvu-dev-1234`, filtra por «Gasfitería»,
+   agrega dos envases de un codo, elige el cliente y envía. Probá recargar la página
+   antes de enviar: el carrito sigue ahí.
+3. `/vendedor` — escribe un mensaje como se lo mandarías al grupo: *«Ferretería El
+   Martillo, abono factura 33780 por 510.459, BCI op 12345678»*. El monto y la factura
+   salen solos del texto.
+4. Manda uno **sin monto** a propósito: se guarda marcado FALTA MONTO.
+5. `/cobranza` — entra como `admin@dvu.cl`, mira la bandeja y baja el Excel.
+6. `/admin` — corrige un precio haciendo clic en la celda, cambia la foto de un producto
+   con el botón «cambiar», y filtra por «— Sin categoría —» para asignar a mano lo que el
+   clasificador no reconoció.
 
 ## Qué falta
 
-- Categorías: el catálogo se navega buscando, no por árbol.
-- Que el vendedor arme el pedido desde el catálogo — el backend ya lo soporta
-  (`POST /pedidos`), falta la pantalla.
+- Que el árbol de categorías cubra más del 73 %: hoy 527 productos quedan sin categoría y
+  sólo se encuentran por búsqueda de texto. Se cierra agregando reglas o asignando a mano
+  desde `/admin`; ninguna de las dos cosas requiere código nuevo.
+- Pagos en línea y despacho, que este prototipo no cablea a propósito.
 - La app Flutter offline-first, que es el destino final de este flujo.

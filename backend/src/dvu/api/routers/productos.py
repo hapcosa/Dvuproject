@@ -29,7 +29,7 @@ from dvu.almacenamiento import (
     validar_imagen_producto,
 )
 from dvu.api.deps import exige_rol
-from dvu.db.models import Producto, ProductoAlias, Usuario
+from dvu.db.models import Categoria, Producto, ProductoAlias, Usuario
 from dvu.db.session import get_session
 
 router = APIRouter(prefix="/productos", tags=["catálogo"])
@@ -53,6 +53,10 @@ class ProductoOut(BaseModel):
     envase: str | None
     precio_lista_clp: int
     imagen_key: str | None
+    #: `None` es un valor legítimo: hay familias del catálogo sin regla de clasificación
+    #: y no se les inventa una. Siguen apareciendo en la búsqueda por texto.
+    categoria_slug: str | None = None
+    categoria_nombre: str | None = None
     codigos_proveedor: list[str] = Field(default_factory=list)
 
 
@@ -89,16 +93,33 @@ class ProductoParche(BaseModel):
     marca: str | None = None
     medida: str | None = None
     activo: bool | None = None
+    #: Slug de la categoría, o `null` para sacarla. La corrección a mano manda: la
+    #: clasificación automática (`make clasificar`) no vuelve a pisar lo que se asignó
+    #: acá, sólo toca los productos que quedaron sin categoría.
+    categoria_slug: str | None = None
 
 
 @router.get("", response_model=PaginaProductos)
 def listar(
     session: SessionDep,
     q: Annotated[str | None, Query(description="Texto libre o código de proveedor")] = None,
+    categoria: Annotated[str | None, Query(description="Slug de la categoría")] = None,
+    sin_categoria: Annotated[
+        bool, Query(description="Sólo lo que ninguna regla clasificó, para revisarlo")
+    ] = False,
     limite: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> PaginaProductos:
     consulta = select(Producto).where(Producto.activo.is_(True))
+
+    if sin_categoria:
+        consulta = consulta.where(Producto.categoria_id.is_(None))
+    elif categoria:
+        # Una categoría que no existe devuelve vacío, no 404: el filtro llega desde un
+        # enlace o un marcador y romper la página entera por eso no ayuda a nadie.
+        consulta = consulta.where(
+            Producto.categoria_id.in_(select(Categoria.id).where(Categoria.slug == categoria))
+        )
 
     if q:
         termino = f"%{q.strip()}%"
@@ -217,10 +238,27 @@ def actualizar(
     """Corrige la ficha. `activo=false` la saca del catálogo sin borrar la fila: puede
     estar referenciada en pedidos históricos."""
     producto = _buscar(session, sku)
-    for campo, valor in parche.model_dump(exclude_unset=True).items():
+    cambios = parche.model_dump(exclude_unset=True)
+
+    if "categoria_slug" in cambios:
+        # Se asigna la relación y no `categoria_id`: la ficha que se devuelve sale de
+        # `producto.categoria`, y tocando sólo el id quedaría mostrando la categoría
+        # anterior hasta la próxima consulta.
+        producto.categoria = _resolver_categoria(session, cambios.pop("categoria_slug"))
+
+    for campo, valor in cambios.items():
         setattr(producto, campo, valor)
     session.flush()
     return _a_salida(producto)
+
+
+def _resolver_categoria(session: Session, slug: str | None) -> Categoria | None:
+    if slug is None:
+        return None
+    categoria = session.scalar(select(Categoria).where(Categoria.slug == slug))
+    if categoria is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail=f"No existe la categoría {slug}")
+    return categoria
 
 
 @router.post("/{sku}/alias", response_model=ProductoOut, status_code=status.HTTP_201_CREATED)
@@ -256,4 +294,7 @@ def _buscar(session: Session, sku: str) -> Producto:
 def _a_salida(producto: Producto) -> ProductoOut:
     salida = ProductoOut.model_validate(producto)
     salida.codigos_proveedor = [a.codigo for a in producto.alias]
+    if producto.categoria is not None:
+        salida.categoria_slug = producto.categoria.slug
+        salida.categoria_nombre = producto.categoria.nombre
     return salida

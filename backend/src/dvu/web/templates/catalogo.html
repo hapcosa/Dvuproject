@@ -11,6 +11,7 @@
 
 <form class="buscador" id="buscador">
   <input type="search" id="q" name="q" placeholder="Buscar: «codo media», «cerradura», o el código del proveedor (PR/49573, KM521…)" aria-label="Buscar en el catálogo">
+  <select id="categoria" aria-label="Categoría"><option value="">Todas las categorías</option></select>
   <button type="submit">Buscar</button>
   <button type="button" class="plano" id="limpiar">Limpiar</button>
 </form>
@@ -49,6 +50,7 @@ const POR_PAGINA = 25;
 const API = document.querySelector('meta[name="dvu-api"]').content;
 let offset = 0;
 let consulta = "";
+let categoria = "";
 
 const filas = document.getElementById("filas");
 const mensaje = document.getElementById("mensaje");
@@ -96,6 +98,7 @@ async function cargar() {
   filas.innerHTML = '<tr><td colspan="7">Cargando…</td></tr>';
   const parametros = new URLSearchParams({ limite: POR_PAGINA, offset });
   if (consulta) parametros.set("q", consulta);
+  if (categoria) parametros.set("categoria", categoria);
   try {
     dibujar(await DVU.pedir(`/productos?${parametros}`));
   } catch (e) {
@@ -107,15 +110,39 @@ async function cargar() {
 document.getElementById("buscador").onsubmit = (evento) => {
   evento.preventDefault();
   consulta = document.getElementById("q").value.trim();
+  categoria = document.getElementById("categoria").value;
   offset = 0;
   cargar();
 };
 document.getElementById("limpiar").onclick = () => {
   document.getElementById("q").value = "";
+  document.getElementById("categoria").value = "";
   consulta = "";
+  categoria = "";
   offset = 0;
   cargar();
 };
+document.getElementById("categoria").onchange = () => {
+  categoria = document.getElementById("categoria").value;
+  offset = 0;
+  cargar();
+};
+
+/** El árbol no viene del PDF: sale de las reglas que aplica `make clasificar`. Las
+ *  categorías vacías no se listan, y lo que ninguna regla reconoció se sigue
+ *  encontrando escribiendo en el buscador. */
+async function cargarCategorias() {
+  try {
+    const categorias = await DVU.pedir("/categorias");
+    document.getElementById("categoria").innerHTML =
+      '<option value="">Todas las categorías</option>' +
+      categorias.map((c) =>
+        `<option value="${DVU.escapar(c.slug)}">${DVU.escapar(c.nombre)} (${c.productos})</option>`
+      ).join("");
+  } catch { /* sin categorías queda sólo la búsqueda por texto, que es la de hoy */ }
+}
+
+cargarCategorias();
 document.getElementById("anterior").onclick = () => {
   offset = Math.max(0, offset - POR_PAGINA);
   cargar();

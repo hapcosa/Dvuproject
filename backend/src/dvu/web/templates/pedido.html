@@ -1,0 +1,354 @@
+{% extends "base.html" %}
+
+{% block contenido %}
+{% with pista_login = "Entra con tu usuario de vendedor. En desarrollo: vendedor@dvu.cl / dvu-dev-1234" %}
+  {% include "_login.html" %}
+{% endwith %}
+
+<div id="app" hidden>
+  <section class="tarjeta">
+    <h2>Armar pedido</h2>
+    <p class="pista">
+      Lo mismo que hoy se manda por WhatsApp, pero con los precios y los múltiplos del
+      catálogo puestos por el sistema. Las cantidades van <strong>en envases</strong>:
+      DVU vende por caja, no por unidad suelta.
+    </p>
+
+    <div class="rejilla">
+      <div class="campo">
+        <label for="cliente">Cliente</label>
+        <select id="cliente"><option value="">Cargando tu cartera…</option></select>
+      </div>
+      <div class="campo">
+        <label for="observaciones">Observaciones <span class="vacio">(opcional)</span></label>
+        <input id="observaciones" placeholder="Entregar en bodega, después de las 15:00">
+      </div>
+    </div>
+  </section>
+
+  <section class="tarjeta">
+    <h3>Buscar en el catálogo</h3>
+    <form class="filtros" id="buscador" style="margin-bottom:12px">
+      <div class="campo" style="flex:1">
+        <label for="q">Descripción o código de proveedor</label>
+        <input type="search" id="q" placeholder="codo media, cerradura, PR/49573…">
+      </div>
+      <div class="campo">
+        <label for="categoria">Categoría</label>
+        <select id="categoria"><option value="">Todas</option></select>
+      </div>
+      <div class="acciones"><button type="submit">Buscar</button></div>
+    </form>
+
+    <div class="desplazable">
+      <table class="datos">
+        <thead>
+          <tr>
+            <th>Código</th><th>Descripción</th><th>Categoría</th>
+            <th class="numero">Precio</th><th>Venta mínima</th>
+            <th class="numero">Envases</th><th></th>
+          </tr>
+        </thead>
+        <tbody id="resultados">
+          <tr><td colspan="7">Busca un producto para empezar.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="tarjeta">
+    <h3>Pedido</h3>
+    <div id="aviso" hidden></div>
+
+    <div class="desplazable">
+      <table class="datos">
+        <thead>
+          <tr>
+            <th>Código</th><th>Descripción</th>
+            <th class="numero">Envases</th><th class="numero">Unidades</th>
+            <th class="numero">Precio unit.</th><th class="numero">Total línea</th><th></th>
+          </tr>
+        </thead>
+        <tbody id="carrito"><tr><td colspan="7">El pedido está vacío.</td></tr></tbody>
+        <tfoot>
+          <tr>
+            <th colspan="5" class="numero">Neto (suma de las líneas)</th>
+            <th class="numero" id="neto">$ 0</th>
+            <th></th>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+
+    <p class="pista" style="margin:10px 0 0">
+      El IVA y el total los calcula el servidor al confirmar: la regla del impuesto vive
+      en un solo lugar y esta página no la repite.
+    </p>
+
+    <div style="display:flex; gap:8px; margin-top:12px">
+      <button type="button" id="enviar">Enviar pedido</button>
+      <button type="button" class="plano" id="vaciar">Vaciar</button>
+    </div>
+  </section>
+
+  <section class="tarjeta">
+    <h3>Mis últimos pedidos</h3>
+    <div class="desplazable">
+      <table class="datos">
+        <thead>
+          <tr>
+            <th>Número</th><th>Cliente</th><th class="numero">Líneas</th>
+            <th class="numero">Total</th><th>Estado</th><th>Fecha</th>
+          </tr>
+        </thead>
+        <tbody id="mios"><tr><td colspan="6">Cargando…</td></tr></tbody>
+      </table>
+    </div>
+  </section>
+</div>
+{% endblock %}
+
+{% block script %}
+<script>
+const CLAVE_CARRITO = "dvu_carrito";
+const aviso = document.getElementById("aviso");
+
+/* El carrito vive en sessionStorage por la misma razón que el token: en un equipo
+ * compartido de bodega, cerrar la pestaña tiene que dejar la máquina limpia. Sobrevive
+ * a un F5, que es el accidente real.
+ *
+ * `client_uuid` es la clave de idempotencia y **no se regenera en cada intento**: si el
+ * envío se corta a mitad de camino y el vendedor vuelve a apretar, el backend reconoce
+ * el mismo uuid y devuelve el pedido que ya creó en vez de duplicarlo. Sólo se renueva
+ * cuando un envío terminó bien. Es el mismo contrato que usará la app Flutter offline.
+ */
+function cargarCarrito() {
+  try {
+    const guardado = JSON.parse(sessionStorage.getItem(CLAVE_CARRITO));
+    if (guardado?.lineas) return guardado;
+  } catch { /* basura en sessionStorage: se empieza de nuevo */ }
+  return { client_uuid: crypto.randomUUID(), lineas: [] };
+}
+
+let carrito = cargarCarrito();
+const guardar = () => sessionStorage.setItem(CLAVE_CARRITO, JSON.stringify(carrito));
+
+/* --- catálogo ----------------------------------------------------------- */
+
+const ventaMinima = (p) =>
+  `${p.multiplo_venta} × ${DVU.escapar(p.envase || p.unidad_venta || "UNID")}`;
+
+async function buscar() {
+  const cuerpo = document.getElementById("resultados");
+  const parametros = new URLSearchParams({ limite: 25 });
+  const q = document.getElementById("q").value.trim();
+  const categoria = document.getElementById("categoria").value;
+  if (q) parametros.set("q", q);
+  if (categoria) parametros.set("categoria", categoria);
+
+  cuerpo.innerHTML = '<tr><td colspan="7">Buscando…</td></tr>';
+  try {
+    const pagina = await DVU.pedir(`/productos?${parametros}`);
+    cuerpo.innerHTML = pagina.items.length
+      ? pagina.items.map((p) => `
+        <tr data-sku="${DVU.escapar(p.sku)}">
+          <td><code>${DVU.escapar(p.codigos_proveedor[0] || p.sku)}</code></td>
+          <td>${DVU.escapar(p.descripcion)}</td>
+          <td>${DVU.oVacio(p.categoria_nombre)}</td>
+          <td class="numero">${DVU.pesos(p.precio_lista_clp)}</td>
+          <td>${ventaMinima(p)}</td>
+          <td class="numero"><input type="number" min="1" value="1" style="width:70px"></td>
+          <td><button type="button" class="plano agregar">Agregar</button></td>
+        </tr>`).join("")
+      : '<tr><td colspan="7">Sin resultados.</td></tr>';
+
+    // Los datos del producto se guardan acá para no volver a pedirlos al agregar.
+    cuerpo.querySelectorAll("tr[data-sku]").forEach((fila, i) => { fila._producto = pagina.items[i]; });
+  } catch (e) {
+    cuerpo.innerHTML = `<tr><td colspan="7">${DVU.escapar(e.message)}</td></tr>`;
+  }
+}
+
+document.getElementById("resultados").onclick = (evento) => {
+  if (!evento.target.classList.contains("agregar")) return;
+  const fila = evento.target.closest("tr");
+  const envases = Math.max(1, parseInt(fila.querySelector("input").value, 10) || 1);
+  agregar(fila._producto, envases);
+};
+
+function agregar(producto, envases) {
+  const existente = carrito.lineas.find((l) => l.sku === producto.sku);
+  if (existente) existente.envases += envases;
+  else carrito.lineas.push({
+    sku: producto.sku,
+    codigo: producto.codigos_proveedor[0] || producto.sku,
+    descripcion: producto.descripcion,
+    multiplo_venta: producto.multiplo_venta,
+    precio_lista_clp: producto.precio_lista_clp,
+    envases,
+  });
+  guardar();
+  dibujarCarrito();
+}
+
+/* --- carrito ------------------------------------------------------------ */
+
+/* La cantidad que viaja a la API es siempre `envases × multiplo_venta`, así que por
+ * construcción es múltiplo de la venta mínima. El backend lo valida igual —es su
+ * regla, no la de esta página— pero el vendedor no puede equivocarse desde acá. */
+const unidades = (linea) => linea.envases * linea.multiplo_venta;
+const totalLinea = (linea) => unidades(linea) * linea.precio_lista_clp;
+
+function dibujarCarrito() {
+  const cuerpo = document.getElementById("carrito");
+  cuerpo.innerHTML = carrito.lineas.length
+    ? carrito.lineas.map((l, i) => `
+      <tr>
+        <td><code>${DVU.escapar(l.codigo)}</code></td>
+        <td>${DVU.escapar(l.descripcion)}<br><small>venta mínima: ${l.multiplo_venta}</small></td>
+        <td class="numero">
+          <input type="number" min="1" value="${l.envases}" data-i="${i}" style="width:70px">
+        </td>
+        <td class="numero">${unidades(l).toLocaleString("es-CL")}</td>
+        <td class="numero">${DVU.pesos(l.precio_lista_clp)}</td>
+        <td class="numero">${DVU.pesos(totalLinea(l))}</td>
+        <td><button type="button" class="plano quitar" data-i="${i}">Quitar</button></td>
+      </tr>`).join("")
+    : '<tr><td colspan="7">El pedido está vacío.</td></tr>';
+
+  document.getElementById("neto").textContent =
+    DVU.pesos(carrito.lineas.reduce((suma, l) => suma + totalLinea(l), 0));
+}
+
+document.getElementById("carrito").onclick = (evento) => {
+  if (!evento.target.classList.contains("quitar")) return;
+  carrito.lineas.splice(Number(evento.target.dataset.i), 1);
+  guardar();
+  dibujarCarrito();
+};
+
+document.getElementById("carrito").onchange = (evento) => {
+  const i = evento.target.dataset.i;
+  if (i === undefined) return;
+  carrito.lineas[Number(i)].envases = Math.max(1, parseInt(evento.target.value, 10) || 1);
+  guardar();
+  dibujarCarrito();
+};
+
+document.getElementById("vaciar").onclick = () => {
+  // Vaciar empieza un pedido nuevo, así que también estrena `client_uuid`.
+  carrito = { client_uuid: crypto.randomUUID(), lineas: [] };
+  guardar();
+  dibujarCarrito();
+  aviso.hidden = true;
+};
+
+/* --- enviar ------------------------------------------------------------- */
+
+document.getElementById("enviar").onclick = async (evento) => {
+  const boton = evento.target;
+  const rut = document.getElementById("cliente").value;
+
+  if (!rut) return DVU.avisar(aviso, "Elige el cliente antes de enviar.", "error");
+  if (!carrito.lineas.length) return DVU.avisar(aviso, "El pedido no tiene líneas.", "error");
+
+  boton.disabled = true;
+  try {
+    const pedido = await DVU.pedir("/pedidos", {
+      method: "POST",
+      body: {
+        client_uuid: carrito.client_uuid,
+        cliente_rut: rut,
+        observaciones: document.getElementById("observaciones").value.trim() || null,
+        // La hora del dispositivo, que es cuando el vendedor lo tomó de verdad. Con la
+        // app offline puede ser muy anterior a la sincronización.
+        creado_en_dispositivo: new Date().toISOString(),
+        lineas: carrito.lineas.map((l) => ({ sku: l.sku, cantidad: unidades(l) })),
+      },
+    });
+
+    DVU.avisar(
+      aviso,
+      `Pedido ${pedido.numero} enviado. Neto ${DVU.pesos(pedido.neto_clp)} · ` +
+      `IVA ${DVU.pesos(pedido.iva_clp)} · Total ${DVU.pesos(pedido.total_clp)}.`,
+      "ok"
+    );
+    carrito = { client_uuid: crypto.randomUUID(), lineas: [] };
+    guardar();
+    dibujarCarrito();
+    document.getElementById("observaciones").value = "";
+    cargarMios();
+  } catch (e) {
+    // El 422 de múltiplos llega con TODAS las líneas malas de una vez, no con la
+    // primera: reenviar cuesta señal. Se muestran todas.
+    DVU.avisar(aviso, e.message, "error");
+  } finally {
+    boton.disabled = false;
+  }
+};
+
+/* --- carga inicial ------------------------------------------------------ */
+
+async function cargarClientes() {
+  const select = document.getElementById("cliente");
+  try {
+    const pagina = await DVU.pedir("/clientes?limite=200");
+    select.innerHTML = pagina.items.length
+      ? '<option value="">Elige el cliente…</option>' +
+        pagina.items.map((c) =>
+          `<option value="${DVU.escapar(c.rut)}">${DVU.escapar(c.razon_social)} — ${DVU.escapar(c.rut)}</option>`
+        ).join("")
+      : '<option value="">Tu cartera está vacía</option>';
+  } catch (e) {
+    select.innerHTML = `<option value="">${DVU.escapar(e.message)}</option>`;
+  }
+}
+
+async function cargarCategorias() {
+  const select = document.getElementById("categoria");
+  try {
+    const categorias = await DVU.pedir("/categorias");
+    select.innerHTML = '<option value="">Todas</option>' +
+      categorias.map((c) =>
+        `<option value="${DVU.escapar(c.slug)}">${DVU.escapar(c.nombre)} (${c.productos})</option>`
+      ).join("");
+  } catch { /* sin categorías se busca por texto, que es como se busca hoy */ }
+}
+
+async function cargarMios() {
+  const cuerpo = document.getElementById("mios");
+  try {
+    const pagina = await DVU.pedir("/pedidos?limite=10");
+    cuerpo.innerHTML = pagina.items.length
+      ? pagina.items.map((p) => `
+        <tr>
+          <td><code>${DVU.escapar(p.numero)}</code></td>
+          <td>${DVU.escapar(p.cliente_rut)}</td>
+          <td class="numero">${p.lineas.length}</td>
+          <td class="numero">${DVU.pesos(p.total_clp)}</td>
+          <td>${DVU.escapar(p.estado)}</td>
+          <td>${p.sincronizado_en ? new Date(p.sincronizado_en).toLocaleString("es-CL") : ""}</td>
+        </tr>`).join("")
+      : '<tr><td colspan="6">Todavía no enviaste ninguno.</td></tr>';
+  } catch (e) {
+    cuerpo.innerHTML = `<tr><td colspan="6">${DVU.escapar(e.message)}</td></tr>`;
+  }
+}
+
+document.getElementById("buscador").onsubmit = (evento) => {
+  evento.preventDefault();
+  buscar();
+};
+
+DVU.proteger({
+  rol: ["vendedor", "cliente"],
+  alIngresar: () => {
+    cargarClientes();
+    cargarCategorias();
+    dibujarCarrito();
+    cargarMios();
+    buscar();
+  },
+});
+</script>
+{% endblock %}

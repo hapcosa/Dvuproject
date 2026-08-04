@@ -105,6 +105,10 @@ extract-dry: ## Extrae solo las 6 primeras páginas, sin imágenes (iteración r
 cargar-catalogo: ## Carga el resultado de la extracción a la BD, con las fotos
 	$(COMPOSE) run --rm api python -m dvu.cli cargar-catalogo --con-imagenes
 
+.PHONY: clasificar
+clasificar: ## Arma el árbol de categorías y clasifica el catálogo por descripción
+	$(COMPOSE) run --rm api python -m dvu.cli clasificar
+
 # --- Fase 2: conciliación y DTE ----------------------------------------------
 .PHONY: conciliar
 conciliar: ## Trae la cartola del banco y concilia los pagos declarados

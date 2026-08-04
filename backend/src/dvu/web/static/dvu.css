@@ -126,6 +126,7 @@ body {
   padding: 12px 0;
 }
 .buscador input[type="search"] { flex: 1; min-width: 220px; }
+.buscador select { min-width: 180px; }
 
 table.catalogo {
   width: 100%;

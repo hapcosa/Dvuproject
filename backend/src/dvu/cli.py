@@ -12,6 +12,7 @@ import typer
 from dvu.almacenamiento import get_almacen
 from dvu.carga.cartola import cartola_de_prueba
 from dvu.carga.catalogo import cargar_catalogo
+from dvu.carga.categorias import clasificar_catalogo
 from dvu.carga.excel import exportar_excel
 from dvu.carga.seed import SeedEnProduccion, sembrar
 from dvu.conciliacion import sincronizar_y_conciliar
@@ -131,6 +132,34 @@ def cargar_catalogo_cmd(
         session.commit()
 
     typer.echo(resumen.resumen())
+
+
+@app.command()
+def clasificar(
+    reclasificar: Annotated[
+        bool,
+        typer.Option(
+            "--reclasificar",
+            help="Vuelve a clasificar TODO, incluso lo que corrigió una persona "
+            "(sólo cuando cambian las reglas)",
+        ),
+    ] = False,
+) -> None:
+    """Crea el árbol de categorías y clasifica el catálogo por descripción.
+
+    El PDF no trae categorías, así que salen de reglas explícitas
+    (`dvu.domain.categorias`). Lo que ninguna regla reconoce queda **sin categoría** a
+    propósito: se sigue encontrando por búsqueda de texto, que es como se busca hoy.
+    """
+    with get_sessionmaker()() as session:
+        resumen = clasificar_catalogo(session, reclasificar=reclasificar)
+        session.commit()
+
+    typer.echo(resumen.resumen())
+    if resumen.ejemplos_sin_categoria:
+        typer.echo("\nSin categoría (muestra, para decidir qué regla falta):")
+        for descripcion in resumen.ejemplos_sin_categoria:
+            typer.echo(f"  - {descripcion}")
 
 
 @app.command()

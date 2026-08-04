@@ -59,6 +59,7 @@ defecto, así que el stack levanta completo sin credenciales de terceros.
 ```bash
 make extract              # catalago/*.pdf -> data/extraccion/*.jsonl + fotos + reporte
 make cargar-catalogo      # data/extraccion -> producto, producto_alias, fotos al almacén
+make clasificar           # arma el árbol de categorías y clasifica por descripción
 ```
 
 `make extract` deja esto en `data/extraccion/`:
@@ -79,6 +80,24 @@ porque extraer las imágenes es una corrida mucho más lenta y cargar los precio
 depender de ella. Una foto que falte en disco no aborta la carga: esa fila queda sin
 imagen y el resto entra igual.
 
+### Categorías
+
+**El PDF no las trae**: sus páginas sólo tienen el folio y los títulos de columna, así
+que no hay encabezado de sección que extraer. El árbol se define a mano en
+[`dvu/domain/categorias.py`](backend/src/dvu/domain/categorias.py) y `make clasificar` lo
+aplica sobre la descripción con palabras clave explícitas. Última corrida sobre el
+catálogo real: **73 % clasificado** (1.448 de 1.975 productos) en diez categorías.
+
+Lo que ninguna regla reconoce **queda sin categoría a propósito** y se lista en la
+salida del comando. Una categoría inventada es peor que ninguna: el vendedor navega el
+árbol, no encuentra lo que sabe que existe y deja de confiar en el árbol completo. Esos
+productos se siguen encontrando por búsqueda de texto, que es como se busca hoy, y en
+`/admin` hay un filtro «Sin categoría» que es exactamente la lista de revisión.
+
+La clasificación automática **no pisa lo que asignó una persona**: sólo toca los
+productos sin categoría. `--reclasificar` fuerza la corrida completa y existe para
+cuando cambian las reglas; es explícito porque destruye correcciones.
+
 La carga es **idempotente**: repetirla con el mismo JSONL deja la base igual. Nada se
 borra —los productos ausentes de una edición se marcan inactivos con
 `--desactivar-ausentes`— porque pueden estar referenciados en pedidos históricos.
@@ -93,7 +112,8 @@ Todo cuelga de `/api/v1`.
 | `POST` | `/auth/login` | — | Devuelve access + refresh token |
 | `POST` | `/auth/refresh` | — | Renueva el access token |
 | `GET` | `/auth/yo` | cualquiera | Usuario de la sesión |
-| `GET` | `/productos` | cualquiera | Catálogo con búsqueda por texto y alias |
+| `GET` | `/productos` | cualquiera | Catálogo con búsqueda por texto y alias; filtra por `categoria` o `sin_categoria` |
+| `GET` | `/categorias` | cualquiera | Árbol con el conteo de productos; las vacías no se ofrecen |
 | `POST` | `/clientes` | vendedor | Alta de ferretería; valida el RUT por módulo 11 |
 | `GET` | `/clientes` | cualquiera | El vendedor sólo ve su cartera |
 | `GET` | `/clientes/{rut}` | cualquiera | Ficha del cliente |
@@ -111,6 +131,8 @@ Todo cuelga de `/api/v1`.
 | `POST` | `/productos` | admin | Alta manual de lo que no viene en el PDF |
 | `PATCH` | `/productos/{sku}` | admin | Corrige la ficha; `activo=false` la desactiva |
 | `POST` | `/productos/{sku}/alias` | admin | Suma un código de proveedor |
+| `POST` | `/categorias` | admin | Crea una categoría; slug repetido da 409 |
+| `PATCH` | `/categorias/{slug}` | admin | Renombra o reordena; el slug no se toca |
 | `POST` | `/productos/{sku}/imagen` | admin | Reemplaza la foto; sólo JPEG, PNG o WebP |
 | `GET` | `/productos/{sku}/imagen` | cualquiera | Redirige a una URL firmada de vida corta |
 | `POST` | `/comprobantes` | vendedor | Registra la transferencia avisada; nunca rechaza |
@@ -159,13 +181,14 @@ make conciliar
 
 ## Prototipo web
 
-Cuatro páginas servidas por la misma app, en <http://localhost:8000>. Reemplazan el
+Cinco páginas servidas por la misma app, en <http://localhost:8000>. Reemplazan el
 catálogo PDF y el grupo de WhatsApp «COMPROBANTES TRANSF.» — **no** cablean pagos en
 línea ni despacho.
 
 | Ruta | Quién | Para qué |
 |---|---|---|
-| `/` | cualquiera | El catálogo con el diseño del PDF impreso, con buscador |
+| `/` | cualquiera | El catálogo con el diseño del PDF impreso, buscador y filtro por categoría |
+| `/pedido` | vendedor, cliente | Arma el pedido desde el catálogo y lo envía |
 | `/vendedor` | vendedor | El formulario que reemplaza el mensaje de WhatsApp |
 | `/cobranza` | admin | Bandeja de comprobantes + descarga del Excel |
 | `/admin` | admin | Edita el catálogo celda por celda y cambia las fotos |
@@ -178,6 +201,14 @@ sin build y sin CDN: se abren en cualquier navegador sin instalar nada.
 El vendedor puede enviar un comprobante incompleto a propósito: se guarda marcado con lo
 que falta (`FALTA MONTO`, `FALTA FACTURA`, …), con los mismos estados y colores que
 cobranza ya lee en el Excel de hoy. Perder el aviso es peor que registrarlo a medias.
+
+En `/pedido` las cantidades se escriben **en envases**, no en unidades: el vendedor pone
+«2 cajas» y la página envía `2 × multiplo_venta`, así que la cantidad es múltiplo válido
+por construcción y no hay forma de tipear un número que el backend vaya a rechazar. El
+carrito vive en `sessionStorage` con un `client_uuid` que **no** se regenera entre
+intentos: si se corta la señal al enviar, reintentar cae en la idempotencia del backend
+en vez de duplicar el pedido. La página tampoco calcula IVA — muestra el neto y después
+los totales que devolvió el servidor, porque la regla del impuesto vive en un solo lugar.
 
 ## Desarrollo
 
