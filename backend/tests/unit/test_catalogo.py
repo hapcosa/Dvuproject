@@ -27,6 +27,7 @@ class TestPrecio:
             ("314.764", 314764),
             ("$ 2.450", 2450),
             (" 990 ", 990),
+            ("$$ 2.682", 2682),  # página 24: el "$" del encabezado pisa el de la fila
         ],
     )
     def test_formatos_reales(self, crudo: str, esperado: int) -> None:

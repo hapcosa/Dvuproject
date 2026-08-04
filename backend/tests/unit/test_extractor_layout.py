@@ -32,6 +32,30 @@ class TestColumnas:
         assert columna_de(700) is None
 
 
+class TestSignoPeso:
+    """El "$" viene como palabra suelta pisando la frontera medida/precio (545.0).
+
+    Medido sobre el PDF real, su centro va de 536.9 a 547.9: el 76% caía del lado de
+    `medida`, y por eso "$" es hoy el valor de `medida` más frecuente de la base.
+    """
+
+    def test_el_signo_pegado_al_precio_no_ensucia_la_medida(self) -> None:
+        celdas = agrupar_en_celdas(
+            [
+                _p('1/2"', 497, 146.3, ancho=20, alto=9.7),
+                _p("$", 534, 146.3, ancho=6, alto=9.7),  # centro 537: caería en medida
+                _p("1.790", 552, 146.3, ancho=26, alto=9.7),
+            ]
+        )
+        assert [c.texto for c in celdas["medida"]] == ['1/2"']
+        assert [c.texto for c in celdas["precio"]] == ["$ 1.790"]
+
+    def test_el_signo_solo_no_se_confunde_con_una_medida(self) -> None:
+        celdas = agrupar_en_celdas([_p("$", 540, 146.3, ancho=6, alto=9.7)])
+        assert celdas["medida"] == []
+        assert [c.texto for c in celdas["precio"]] == ["$"]
+
+
 class TestInicioDeDatos:
     def test_detecta_el_encabezado(self) -> None:
         palabras = [_p("Código", 20, 102), _p("Descripción", 253, 102), _p("Venta", 352, 115)]

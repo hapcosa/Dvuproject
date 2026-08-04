@@ -14,7 +14,9 @@ from decimal import Decimal
 # --- precios -----------------------------------------------------------------
 
 # Chile usa "." como separador de miles y no hay decimales en CLP.
-_RE_PRECIO = re.compile(r"^\$?\s*(\d{1,3}(?:\.\d{3})+|\d+)\s*$")
+# El signo peso admite repetición: en algunas páginas del catálogo el rótulo "$" del
+# encabezado se superpone al de la fila y pdfplumber entrega "$$".
+_RE_PRECIO = re.compile(r"^\$*\s*(\d{1,3}(?:\.\d{3})+|\d+)\s*$")
 
 
 def parse_precio_clp(raw: str | None) -> int | None:

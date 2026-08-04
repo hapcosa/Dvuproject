@@ -10,7 +10,8 @@
 <body>
   <nav class="nav">
     <a href="/" {% if request.url.path == '/' %}class="activo"{% endif %}>Catálogo</a>
-    <a href="/vendedor" {% if request.url.path == '/vendedor' %}class="activo"{% endif %}>Vendedor</a>
+    <a href="/pedido" {% if request.url.path == '/pedido' %}class="activo"{% endif %}>Pedido</a>
+    <a href="/vendedor" {% if request.url.path == '/vendedor' %}class="activo"{% endif %}>Comprobantes</a>
     <a href="/cobranza" {% if request.url.path == '/cobranza' %}class="activo"{% endif %}>Cobranza</a>
     <a href="/admin" {% if request.url.path == '/admin' %}class="activo"{% endif %}>Administrar</a>
     <span class="sep"></span>

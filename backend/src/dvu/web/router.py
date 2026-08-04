@@ -27,6 +27,7 @@ router = APIRouter(tags=["web"], include_in_schema=False)
 PAGINAS = {
     "/": ("catalogo.html", "Catálogo"),
     "/admin": ("admin.html", "Administrar catálogo"),
+    "/pedido": ("pedido.html", "Armar pedido"),
     "/vendedor": ("vendedor.html", "Registrar comprobante"),
     "/cobranza": ("cobranza.html", "Bandeja de cobranza"),
 }
@@ -48,6 +49,11 @@ def catalogo(request: Request) -> HTMLResponse:
 @router.get("/admin", response_class=HTMLResponse)
 def admin(request: Request) -> HTMLResponse:
     return _render(request, *PAGINAS["/admin"])
+
+
+@router.get("/pedido", response_class=HTMLResponse)
+def pedido(request: Request) -> HTMLResponse:
+    return _render(request, *PAGINAS["/pedido"])
 
 
 @router.get("/vendedor", response_class=HTMLResponse)

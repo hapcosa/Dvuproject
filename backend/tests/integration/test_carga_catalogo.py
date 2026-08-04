@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, BinaryIO
 
 import pytest
 from sqlalchemy import func, select
@@ -224,3 +224,97 @@ def test_desactivar_ausentes_no_borra_productos(sesion: Session, extraccion: Pat
 def test_falta_fuentes_json_es_error_explicito(sesion: Session, tmp_path: Path) -> None:
     with pytest.raises(FileNotFoundError, match="dvu extraer"):
         cargar_catalogo(sesion, tmp_path)
+
+
+@pytest.fixture
+def con_imagenes(extraccion: Path) -> Path:
+    """Añade a la extracción una foto que sirve a las dos filas de la página 56.
+
+    Es el caso real: el catálogo trae una foto por familia de productos, no por SKU.
+    """
+    (extraccion / "imagenes").mkdir()
+    (extraccion / "imagenes" / "abc123.jpg").write_bytes(b"\xff\xd8\xff datos jpeg")
+    (extraccion / "imagenes.json").write_text(
+        json.dumps({ARCHIVO: {"56:4": "catalogo/abc123.jpg", "56:5": "catalogo/abc123.jpg"}}),
+        encoding="utf-8",
+    )
+    return extraccion
+
+
+class AlmacenEspia:
+    """Almacén de mentira: registra lo que se subió sin tocar disco ni MinIO."""
+
+    def __init__(self) -> None:
+        self.subidos: list[tuple[str, str]] = []
+        self.contenido: dict[str, bytes] = {}
+
+    def guardar(self, key: str, datos: BinaryIO, content_type: str) -> str:
+        self.subidos.append((key, content_type))
+        self.contenido[key] = datos.read()
+        return key
+
+    def url_firmada(self, key: str, *, segundos: int = 300) -> str:
+        return f"https://ejemplo/{key}"
+
+    def leer(self, key: str) -> bytes | None:
+        return self.contenido.get(key)
+
+
+def test_las_fotos_se_suben_una_vez_y_se_asocian_a_cada_fila(
+    sesion: Session, con_imagenes: Path
+) -> None:
+    almacen = AlmacenEspia()
+
+    resumen = cargar_catalogo(sesion, con_imagenes, almacen=almacen)
+
+    # Una sola subida aunque la compartan dos filas: el extractor ya deduplicó por sha.
+    assert almacen.subidos == [("catalogo/abc123.jpg", "image/jpeg")]
+    assert resumen.imagenes_subidas == 1
+    assert resumen.productos_con_imagen == 2
+
+    for sku in ("DVU-H20184", "DVU-H20185"):
+        producto = sesion.scalar(select(Producto).where(Producto.sku == sku))
+        assert producto is not None
+        assert producto.imagen_key == "catalogo/abc123.jpg"
+
+
+def test_sin_almacen_la_carga_ignora_las_imagenes(sesion: Session, con_imagenes: Path) -> None:
+    """Cargar el texto no puede depender de la extracción de fotos, que son horas."""
+    resumen = cargar_catalogo(sesion, con_imagenes)
+
+    assert resumen.imagenes_subidas == 0
+    producto = sesion.scalar(select(Producto).where(Producto.sku == "DVU-H20184"))
+    assert producto is not None
+    assert producto.imagen_key is None
+
+
+def test_una_foto_que_falta_en_disco_no_aborta_la_carga(
+    sesion: Session, con_imagenes: Path
+) -> None:
+    """El catálogo con una foto menos sirve; sin precios, no."""
+    (con_imagenes / "imagenes" / "abc123.jpg").unlink()
+    almacen = AlmacenEspia()
+
+    resumen = cargar_catalogo(sesion, con_imagenes, almacen=almacen)
+
+    assert almacen.subidos == []
+    assert resumen.productos_creados == 3
+    producto = sesion.scalar(select(Producto).where(Producto.sku == "DVU-H20184"))
+    assert producto is not None
+    assert producto.imagen_key is None
+
+
+def test_recargar_sin_imagenes_no_borra_la_foto_que_ya_estaba(
+    sesion: Session, con_imagenes: Path
+) -> None:
+    """Una edición nueva del PDF sin fotos deja la del catálogo anterior: mejor esa que
+    un hueco en la grilla."""
+    cargar_catalogo(sesion, con_imagenes, almacen=AlmacenEspia())
+    sesion.flush()
+    (con_imagenes / "imagenes.json").unlink()
+
+    cargar_catalogo(sesion, con_imagenes)
+
+    producto = sesion.scalar(select(Producto).where(Producto.sku == "DVU-H20184"))
+    assert producto is not None
+    assert producto.imagen_key == "catalogo/abc123.jpg"

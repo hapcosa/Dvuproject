@@ -44,8 +44,9 @@ from dvu.extractor.layout import (
     inicio_de_datos,
 )
 
-#: Un precio del catálogo: 3 dígitos, o miles separados por punto.
-_RE_PRECIO_CELDA = re.compile(r"^\$?\s*\d{1,3}(?:\.\d{3})*$")
+#: Un precio del catálogo: 3 dígitos, o miles separados por punto. El "$" puede venir
+#: repetido ("$$") cuando el rótulo del encabezado se superpone al de la fila.
+_RE_PRECIO_CELDA = re.compile(r"^\$*\s*\d{1,3}(?:\.\d{3})*$")
 
 _COLUMNAS_EXCLUSIVAS: tuple[Columna, ...] = ("codigo",)
 _COLUMNAS_HIBRIDAS: tuple[Columna, ...] = ("descripcion", "venta_min", "marca", "medida")

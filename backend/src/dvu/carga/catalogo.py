@@ -30,11 +30,37 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from dvu.db.models import CatalogoFilaCruda, CatalogoFuente, Producto, ProductoAlias
+from dvu.almacenamiento import Almacen
+from dvu.db.models import (
+    CatalogoActivo,
+    CatalogoFilaCruda,
+    CatalogoFuente,
+    CatalogoPagina,
+    Producto,
+    ProductoAlias,
+)
 
 #: De dónde viene el código alternativo. Hoy sólo el catálogo impreso; en Fase 2
 #: convivirá con los códigos de cada proveedor.
 ORIGEN_ALIAS = "catalogo_pdf"
+
+#: `extraer --con-imagenes` deja las fotos acá y el mapa fila -> foto al lado.
+SUBDIR_IMAGENES = "imagenes"
+ARCHIVO_IMAGENES = "imagenes.json"
+
+#: `extraer` deja acá los activos del diseño: banda del encabezado, logos de marca y
+#: las páginas de arte recortadas del PDF original.
+SUBDIR_PLANTILLA = "plantilla"
+ARCHIVO_PLANTILLA = "plantilla.json"
+
+#: Extensión del archivo -> tipo MIME. PyMuPDF devuelve casi siempre `jpeg`.
+TIPOS_POR_EXTENSION = {
+    "jpg": "image/jpeg",
+    "jpeg": "image/jpeg",
+    "png": "image/png",
+    "webp": "image/webp",
+    "pdf": "application/pdf",
+}
 
 
 @dataclass(slots=True)
@@ -45,6 +71,11 @@ class ResumenCarga:
     productos_actualizados: int = 0
     alias_creados: int = 0
     desactivados: int = 0
+    imagenes_subidas: int = 0
+    productos_con_imagen: int = 0
+    logos_subidos: int = 0
+    productos_con_marca: int = 0
+    paginas_diseno: int = 0
     #: Códigos repetidos dentro del mismo JSONL cuyos datos no coinciden. Gana el
     #: primero y el conflicto se reporta: es un error del catálogo, no de la carga.
     conflictos: list[str] = field(default_factory=list)
@@ -58,6 +89,11 @@ class ResumenCarga:
             f"  Productos creados      : {self.productos_creados}",
             f"  Productos actualizados : {self.productos_actualizados}",
             f"  Alias creados          : {self.alias_creados}",
+            f"  Imágenes subidas       : {self.imagenes_subidas}",
+            f"  Productos con imagen   : {self.productos_con_imagen}",
+            f"  Logos de marca subidos : {self.logos_subidos}",
+            f"  Productos con marca    : {self.productos_con_marca}",
+            f"  Páginas de diseño      : {self.paginas_diseno}",
             f"  Productos desactivados : {self.desactivados}",
             f"  Códigos en conflicto   : {len(self.conflictos)}",
         ]
@@ -81,12 +117,18 @@ def cargar_catalogo(
     directorio: Path,
     *,
     desactivar_ausentes: bool = False,
+    almacen: Almacen | None = None,
 ) -> ResumenCarga:
     """Carga `catalogo.jsonl` + `revision.jsonl` + `fuentes.json` de `directorio`.
 
     `desactivar_ausentes` marca `activo=False` todo producto que no venga en este
     JSONL. Sólo tiene sentido cuando se carga el catálogo **completo**; por eso está
     apagado por defecto.
+
+    Con `almacen`, además sube las fotos que dejó `extraer --con-imagenes` y les pone el
+    `imagen_key` a los productos. Sin él la carga es exactamente la de antes: la
+    extracción de imágenes es una corrida aparte y muy lenta, así que cargar el texto no
+    puede depender de que exista.
     """
     resumen = ResumenCarga()
 
@@ -97,7 +139,9 @@ def cargar_catalogo(
     revision = list(_leer_jsonl(directorio / "revision.jsonl"))
     _guardar_filas_crudas(session, [*cargables, *revision], fuentes, resumen)
 
-    vistos = _upsert_productos(session, cargables, resumen)
+    imagenes = _subir_imagenes(directorio, almacen, resumen) if almacen else {}
+    marcas = _cargar_plantilla(session, directorio, almacen, resumen) if almacen else {}
+    vistos = _upsert_productos(session, cargables, resumen, imagenes, marcas)
 
     if desactivar_ausentes:
         resumen.desactivados = _desactivar_ausentes(session, vistos)
@@ -164,8 +208,116 @@ def _guardar_filas_crudas(
         resumen.filas_crudas += 1
 
 
+def _subir_imagenes(
+    directorio: Path, almacen: Almacen, resumen: ResumenCarga
+) -> dict[str, dict[str, str]]:
+    """Sube las fotos extraídas al almacén y devuelve el mapa archivo -> «pág:orden» -> key.
+
+    Cada key se sube **una sola vez** aunque la compartan veinte filas: el extractor ya
+    dedupe por sha256, y una foto sirve a toda una familia de productos.
+
+    Una foto que falta en disco no aborta la carga: se omite del mapa y esa fila queda
+    sin imagen. El catálogo con una foto menos sirve; sin precios, no.
+    """
+    ruta = directorio / ARCHIVO_IMAGENES
+    if not ruta.exists():
+        return {}
+
+    mapa: dict[str, dict[str, str]] = json.loads(ruta.read_text(encoding="utf-8"))
+    dir_imagenes = directorio / SUBDIR_IMAGENES
+    subidas: set[str] = set()
+
+    for asociaciones in mapa.values():
+        for posicion, key in list(asociaciones.items()):
+            if key in subidas:
+                continue
+            origen = dir_imagenes / Path(key).name
+            tipo = TIPOS_POR_EXTENSION.get(origen.suffix.lstrip(".").lower())
+            if not origen.exists() or tipo is None:
+                del asociaciones[posicion]
+                continue
+            with origen.open("rb") as fh:
+                almacen.guardar(key, fh, tipo)
+            subidas.add(key)
+            resumen.imagenes_subidas += 1
+
+    return mapa
+
+
+def _cargar_plantilla(
+    session: Session, directorio: Path, almacen: Almacen, resumen: ResumenCarga
+) -> dict[str, dict[str, str]]:
+    """Sube los activos del diseño y registra páginas de arte y banda del encabezado.
+
+    Devuelve el mapa archivo -> «pág:orden» -> key del logo de marca, que `_upsert`
+    aplica a cada producto.
+    """
+    ruta = directorio / ARCHIVO_PLANTILLA
+    if not ruta.exists():
+        return {}
+
+    datos: dict[str, dict[str, Any]] = json.loads(ruta.read_text(encoding="utf-8"))
+    origen = directorio / SUBDIR_PLANTILLA
+    subidas: set[str] = set()
+
+    def subir(key: str) -> bool:
+        """`False` si el archivo no está: se omite y el catálogo sale sin esa pieza."""
+        if key in subidas:
+            return True
+        archivo = origen / Path(key).name
+        tipo = TIPOS_POR_EXTENSION.get(archivo.suffix.lstrip(".").lower())
+        if not archivo.exists() or tipo is None:
+            return False
+        with archivo.open("rb") as fh:
+            almacen.guardar(key, fh, tipo)
+        subidas.add(key)
+        return True
+
+    activos = {a.clave: a for a in session.scalars(select(CatalogoActivo))}
+    paginas = {(p.archivo, p.pagina): p for p in session.scalars(select(CatalogoPagina))}
+    marcas: dict[str, dict[str, str]] = {}
+
+    for archivo, bloque in datos.items():
+        for paridad, key in bloque.get("banners", {}).items():
+            if not subir(key):
+                continue
+            clave = f"banner_{paridad}"
+            activo = activos.get(clave)
+            if activo is None:
+                activo = CatalogoActivo(clave=clave, key_objeto=key)
+                session.add(activo)
+                activos[clave] = activo
+            activo.key_objeto = key
+
+        for info in bloque.get("paginas", []):
+            if not (subir(info["key_pdf"]) and subir(info["key_png"])):
+                continue
+            pagina = paginas.get((archivo, info["pagina"]))
+            if pagina is None:
+                pagina = CatalogoPagina(archivo=archivo, pagina=info["pagina"])
+                session.add(pagina)
+                paginas[(archivo, info["pagina"])] = pagina
+            pagina.tipo = info["tipo"]
+            pagina.key_pdf = info["key_pdf"]
+            pagina.key_png = info["key_png"]
+            resumen.paginas_diseno += 1
+
+        asignaciones = dict(bloque.get("marcas", {}))
+        for posicion, key in list(asignaciones.items()):
+            if not subir(key):
+                del asignaciones[posicion]
+        marcas[archivo] = asignaciones
+
+    resumen.logos_subidos = sum(1 for k in subidas if k.startswith("catalogo/marcas/"))
+    return marcas
+
+
 def _upsert_productos(
-    session: Session, registros: list[dict[str, Any]], resumen: ResumenCarga
+    session: Session,
+    registros: list[dict[str, Any]],
+    resumen: ResumenCarga,
+    imagenes: dict[str, dict[str, str]],
+    marcas: dict[str, dict[str, str]],
 ) -> set[str]:
     """Devuelve los SKU vistos en esta carga."""
     existentes = {p.sku: p for p in session.scalars(select(Producto))}
@@ -190,6 +342,18 @@ def _upsert_productos(
             resumen.productos_actualizados += 1
 
         _aplicar(producto, reg)
+
+        # Una foto que ya no viene en esta edición no se borra: mejor la del catálogo
+        # anterior que un hueco en la grilla.
+        key = imagenes.get(reg["archivo"], {}).get(f"{reg['pagina']}:{reg['orden']}")
+        if key is not None:
+            producto.imagen_key = key
+            resumen.productos_con_imagen += 1
+
+        logo = marcas.get(reg["archivo"], {}).get(f"{reg['pagina']}:{reg['orden']}")
+        if logo is not None:
+            producto.marca_logo_key = logo
+            resumen.productos_con_marca += 1
 
         clave = (reg["codigo"], ORIGEN_ALIAS)
         if clave not in alias_existentes:

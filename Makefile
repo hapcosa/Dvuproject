@@ -102,8 +102,12 @@ extract-dry: ## Extrae solo las 6 primeras páginas, sin imágenes (iteración r
 	$(COMPOSE) run --rm api python -m dvu.cli extraer --hasta-pagina 6
 
 .PHONY: cargar-catalogo
-cargar-catalogo: ## Carga el resultado de la extracción a la BD
-	$(COMPOSE) run --rm api python -m dvu.cli cargar-catalogo
+cargar-catalogo: ## Carga el resultado de la extracción a la BD, con las fotos
+	$(COMPOSE) run --rm api python -m dvu.cli cargar-catalogo --con-imagenes
+
+.PHONY: clasificar
+clasificar: ## Arma el árbol de categorías y clasifica el catálogo por descripción
+	$(COMPOSE) run --rm api python -m dvu.cli clasificar
 
 # --- Fase 2: conciliación y DTE ----------------------------------------------
 .PHONY: conciliar
@@ -120,6 +124,12 @@ exportar: ## Excel de ventas, detalle y pagos en ./data/exports
 	@mkdir -p data/exports
 	$(COMPOSE) run --rm api python -m dvu.cli exportar \
 	  --salida data/exports/dvu-ventas-$$(date +%Y%m%d).xlsx
+
+.PHONY: catalogo-pdf
+catalogo-pdf: ## Catálogo en PDF con el diseño del impreso, en ./data/exports
+	@mkdir -p data/exports
+	$(COMPOSE) run --rm api python -m dvu.cli catalogo-pdf \
+	  --salida data/exports/catalogo-dvu-$$(date +%Y%m%d).pdf
 
 .PHONY: backup
 backup: ## Backup de la BD a ./data/backups

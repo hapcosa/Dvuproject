@@ -9,8 +9,11 @@ from typing import Annotated
 
 import typer
 
+from dvu.almacenamiento import get_almacen
 from dvu.carga.cartola import cartola_de_prueba
 from dvu.carga.catalogo import cargar_catalogo
+from dvu.carga.catalogo_impreso import exportar_catalogo_pdf
+from dvu.carga.categorias import clasificar_catalogo
 from dvu.carga.excel import exportar_excel
 from dvu.carga.seed import SeedEnProduccion, sembrar
 from dvu.conciliacion import sincronizar_y_conciliar
@@ -18,6 +21,12 @@ from dvu.config import get_settings
 from dvu.db.session import get_sessionmaker
 from dvu.extractor.catalogo_pdf import ResultadoExtraccion, extraer_pdf, iter_pdfs
 from dvu.extractor.imagenes import asociar_a_filas, extraer_imagenes
+from dvu.extractor.plantilla import (
+    asociar_marcas_a_filas,
+    extraer_banners,
+    extraer_marcas,
+    extraer_paginas_diseno,
+)
 from dvu.extractor.reporte import escribir_salidas
 from dvu.integraciones.banco import ErrorBanco
 
@@ -54,6 +63,7 @@ def extraer(
 
     if con_imagenes:
         _extraer_imagenes(pdfs, resultados, destino, hasta_pagina)
+    _extraer_plantilla(pdfs, resultados, destino, hasta_pagina)
 
     typer.echo(reporte.resumen())
     typer.echo(f"  Salidas en {destino}")
@@ -91,6 +101,59 @@ def _extraer_imagenes(
     )
 
 
+def _extraer_plantilla(
+    pdfs: list[Path],
+    resultados: list[ResultadoExtraccion],
+    destino: Path,
+    hasta_pagina: int | None,
+) -> None:
+    """Activos del diseño: banda del encabezado, logos de marca y páginas de arte.
+
+    Va aparte de `--con-imagenes` porque no son fotos de producto sino la maqueta, y sin
+    ella lo que se emite es una planilla de precios, no el catálogo de DVU.
+    """
+    dir_plantilla = destino / "plantilla"
+    salida: dict[str, dict[str, object]] = {}
+
+    for pdf, resultado in zip(pdfs, resultados, strict=True):
+        typer.echo(f"Plantilla de {pdf.name} …")
+        con_filas = {fila.pagina for fila in resultado.filas}
+
+        banners = extraer_banners(pdf, dir_plantilla, con_filas)
+        logos = extraer_marcas(pdf, dir_plantilla, hasta_pagina=hasta_pagina)
+
+        filas_por_pagina: dict[int, list[tuple[int, float]]] = {}
+        for fila in resultado.filas:
+            filas_por_pagina.setdefault(fila.pagina, []).append((fila.orden, fila.y_centro))
+        marcas = asociar_marcas_a_filas(logos, filas_por_pagina)
+
+        paginas = extraer_paginas_diseno(
+            pdf, dir_plantilla, con_filas, hasta_pagina=hasta_pagina
+        )
+
+        salida[pdf.name] = {
+            "banners": banners,
+            "marcas": {f"{p}:{o}": key for (p, o), key in marcas.items()},
+            "paginas": [
+                {
+                    "pagina": pag.pagina,
+                    "tipo": pag.tipo,
+                    "key_pdf": pag.key_pdf,
+                    "key_png": pag.key_png,
+                }
+                for pag in paginas
+            ],
+        }
+        typer.echo(
+            f"  {len({logo.key for logo in logos})} logos de marca, "
+            f"{len(marcas)} filas con marca, {len(paginas)} páginas de diseño"
+        )
+
+    (destino / "plantilla.json").write_text(
+        json.dumps(salida, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+
+
 @app.command("cargar-catalogo")
 def cargar_catalogo_cmd(
     directorio: Annotated[
@@ -104,6 +167,13 @@ def cargar_catalogo_cmd(
             "(sólo con el catálogo completo)",
         ),
     ] = False,
+    con_imagenes: Annotated[
+        bool,
+        typer.Option(
+            "--con-imagenes",
+            help="Sube al almacén las fotos de `extraer --con-imagenes` y las asocia",
+        ),
+    ] = False,
 ) -> None:
     """Fase 0 — carga el JSONL extraído a producto / producto_alias."""
     cfg = get_settings()
@@ -111,13 +181,46 @@ def cargar_catalogo_cmd(
 
     with get_sessionmaker()() as session:
         try:
-            resumen = cargar_catalogo(session, origen, desactivar_ausentes=desactivar_ausentes)
+            resumen = cargar_catalogo(
+                session,
+                origen,
+                desactivar_ausentes=desactivar_ausentes,
+                almacen=get_almacen() if con_imagenes else None,
+            )
         except FileNotFoundError as exc:
             typer.secho(str(exc), fg=typer.colors.RED)
             raise typer.Exit(1) from exc
         session.commit()
 
     typer.echo(resumen.resumen())
+
+
+@app.command()
+def clasificar(
+    reclasificar: Annotated[
+        bool,
+        typer.Option(
+            "--reclasificar",
+            help="Vuelve a clasificar TODO, incluso lo que corrigió una persona "
+            "(sólo cuando cambian las reglas)",
+        ),
+    ] = False,
+) -> None:
+    """Crea el árbol de categorías y clasifica el catálogo por descripción.
+
+    El PDF no trae categorías, así que salen de reglas explícitas
+    (`dvu.domain.categorias`). Lo que ninguna regla reconoce queda **sin categoría** a
+    propósito: se sigue encontrando por búsqueda de texto, que es como se busca hoy.
+    """
+    with get_sessionmaker()() as session:
+        resumen = clasificar_catalogo(session, reclasificar=reclasificar)
+        session.commit()
+
+    typer.echo(resumen.resumen())
+    if resumen.ejemplos_sin_categoria:
+        typer.echo("\nSin categoría (muestra, para decidir qué regla falta):")
+        for descripcion in resumen.ejemplos_sin_categoria:
+            typer.echo(f"  - {descripcion}")
 
 
 @app.command()
@@ -149,6 +252,33 @@ def exportar(
         )
     destino.write_bytes(contenido)
     typer.echo(f"Excel escrito en {destino} ({len(contenido) // 1024} KB)")
+
+
+@app.command("catalogo-pdf")
+def catalogo_pdf_cmd(
+    salida: Annotated[Path | None, typer.Option(help="Ruta del .pdf a escribir")] = None,
+    categoria: Annotated[
+        str | None, typer.Option(help="Slug de la categoría; vacío = catálogo completo")
+    ] = None,
+    sin_imagenes: Annotated[
+        bool,
+        typer.Option("--sin-imagenes", help="Lista de precios: sin fotos, pesa cien veces menos"),
+    ] = False,
+) -> None:
+    """Exporta el catálogo a PDF con el diseño del impreso.
+
+    Las fotos salen del almacén, donde las dejó `cargar-catalogo --con-imagenes`. Sin
+    MinIO configurado se leen del respaldo en disco, y las que falten van con el guion
+    de dato faltante en vez de inventarse.
+    """
+    sufijo = f"-{categoria}" if categoria else ""
+    destino = salida or Path(f"catalogo-dvu{sufijo}-{datetime.now(UTC):%Y%m%d}.pdf")
+    with get_sessionmaker()() as session:
+        contenido = exportar_catalogo_pdf(
+            session, get_almacen(), categoria=categoria, con_imagenes=not sin_imagenes
+        )
+    destino.write_bytes(contenido)
+    typer.echo(f"PDF escrito en {destino} ({len(contenido) // 1024} KB)")
 
 
 @app.command()

@@ -59,11 +59,13 @@ defecto, así que el stack levanta completo sin credenciales de terceros.
 ## Cargar el catálogo
 
 ```bash
-make extract              # catalago/*.pdf -> data/extraccion/*.jsonl + reporte
-make cargar-catalogo      # data/extraccion -> producto, producto_alias
+make extract              # catalago/*.pdf -> data/extraccion/*.jsonl + fotos + reporte
+make cargar-catalogo      # data/extraccion -> producto, producto_alias, fotos al almacén
+make clasificar           # arma el árbol de categorías y clasifica por descripción
+make catalogo-pdf         # vuelve a emitir el catálogo en PDF con el diseño del impreso
 ```
 
-`make extract` deja cuatro archivos en `data/extraccion/`:
+`make extract` deja esto en `data/extraccion/`:
 
 | Archivo | Contenido |
 |---|---|
@@ -71,6 +73,53 @@ make cargar-catalogo      # data/extraccion -> producto, producto_alias
 | `revision.jsonl` | Filas que necesitan intervención humana, con su diagnóstico |
 | `reporte.json` | Métricas de calidad y verificación del criterio de Fase 0 |
 | `fuentes.json` | sha256 y páginas de cada PDF, para trazar la carga |
+| `imagenes/` + `imagenes.json` | Las fotos de producto y a qué fila va cada una |
+
+Las fotos salen del PDF por posición: se toma lo que cae en la columna «Imagen», se
+descartan iconos y logos por tamaño, y se deduplica por sha256 —una misma foto sirve a
+toda una familia de productos, no a un SKU—. `cargar-catalogo --con-imagenes` las sube
+al almacén y les pone el `imagen_key` al producto; sin ese flag la carga es sólo texto,
+porque extraer las imágenes es una corrida mucho más lenta y cargar los precios no puede
+depender de ella. Una foto que falte en disco no aborta la carga: esa fila queda sin
+imagen y el resto entra igual.
+
+### Categorías
+
+**El PDF no las trae**: sus páginas sólo tienen el folio y los títulos de columna, así
+que no hay encabezado de sección que extraer. El árbol se define a mano en
+[`dvu/domain/categorias.py`](backend/src/dvu/domain/categorias.py) y `make clasificar` lo
+aplica sobre la descripción con palabras clave explícitas. Última corrida sobre el
+catálogo real: **73 % clasificado** (1.448 de 1.975 productos) en diez categorías.
+
+Lo que ninguna regla reconoce **queda sin categoría a propósito** y se lista en la
+salida del comando. Una categoría inventada es peor que ninguna: el vendedor navega el
+árbol, no encuentra lo que sabe que existe y deja de confiar en el árbol completo. Esos
+productos se siguen encontrando por búsqueda de texto, que es como se busca hoy, y en
+`/admin` hay un filtro «Sin categoría» que es exactamente la lista de revisión.
+
+La clasificación automática **no pisa lo que asignó una persona**: sólo toca los
+productos sin categoría. `--reclasificar` fuerza la corrida completa y existe para
+cuando cambian las reglas; es explícito porque destruye correcciones.
+
+### Volver a emitir el catálogo en PDF
+
+`make catalogo-pdf` genera el impreso de nuevo, con el diseño del original y los precios
+que hay hoy en la base —correcciones del administrador incluidas—. **No hay que ir a
+buscar las fotos**: ya están en el almacén desde `cargar-catalogo --con-imagenes`, y este
+paso las lee de ahí.
+
+La geometría sale de `extractor/layout.py`, el mismo archivo con el que se *lee* el PDF
+original. Si la próxima edición mueve una columna, se recalibra en un lugar y las dos
+puntas quedan consistentes.
+
+| Modo | Peso | Páginas | Tiempo | Para qué |
+|---|---|---|---|---|
+| Con fotos (por defecto) | ~24 MB | 142 | ~14 s | El catálogo para imprimir o dejar en el mostrador |
+| `--sin-imagenes` | ~250 KB | 51 | ~4 s | La lista de precios, que es lo que se manda por WhatsApp |
+
+Sin fotos la columna «Imagen» no se deja en blanco: se saca, y su ancho va a la
+descripción. Una foto que falta en el almacén, o que está corrupta, deja el guion de dato
+faltante y **no** tumba el resto del catálogo.
 
 La carga es **idempotente**: repetirla con el mismo JSONL deja la base igual. Nada se
 borra —los productos ausentes de una edición se marcan inactivos con
@@ -86,7 +135,8 @@ Todo cuelga de `/api/v1`.
 | `POST` | `/auth/login` | — | Devuelve access + refresh token |
 | `POST` | `/auth/refresh` | — | Renueva el access token |
 | `GET` | `/auth/yo` | cualquiera | Usuario de la sesión |
-| `GET` | `/productos` | cualquiera | Catálogo con búsqueda por texto y alias |
+| `GET` | `/productos` | cualquiera | Catálogo con búsqueda por texto y alias; filtra por `categoria` o `sin_categoria` |
+| `GET` | `/categorias` | cualquiera | Árbol con el conteo de productos; las vacías no se ofrecen |
 | `POST` | `/clientes` | vendedor | Alta de ferretería; valida el RUT por módulo 11 |
 | `GET` | `/clientes` | cualquiera | El vendedor sólo ve su cartera |
 | `GET` | `/clientes/{rut}` | cualquiera | Ficha del cliente |
@@ -101,9 +151,14 @@ Todo cuelga de `/api/v1`.
 | `GET` | `/pagos` | cualquiera | Bandeja; `?estado=pendiente_revision` es la de excepciones |
 | `POST` | `/pagos/{uuid}/estado` | admin | Verifica, rechaza o manda a revisión |
 | `GET` | `/reportes/ventas.xlsx` | admin | El Excel del dueño, generado al vuelo |
+| `GET` | `/reportes/catalogo.pdf` | cualquiera | El catálogo impreso; filtra por `categoria`/`q` |
 | `POST` | `/productos` | admin | Alta manual de lo que no viene en el PDF |
 | `PATCH` | `/productos/{sku}` | admin | Corrige la ficha; `activo=false` la desactiva |
 | `POST` | `/productos/{sku}/alias` | admin | Suma un código de proveedor |
+| `POST` | `/categorias` | admin | Crea una categoría; slug repetido da 409 |
+| `PATCH` | `/categorias/{slug}` | admin | Renombra o reordena; el slug no se toca |
+| `POST` | `/productos/{sku}/imagen` | admin | Reemplaza la foto; sólo JPEG, PNG o WebP |
+| `GET` | `/productos/{sku}/imagen` | cualquiera | Redirige a una URL firmada de vida corta |
 | `POST` | `/comprobantes` | vendedor | Registra la transferencia avisada; nunca rechaza |
 | `POST` | `/comprobantes/{uuid}/imagen` | vendedor | Adjunta la foto del comprobante |
 | `GET` | `/comprobantes` | cualquiera | Bandeja de cobranza; el vendedor sólo ve los suyos |
@@ -150,16 +205,17 @@ make conciliar
 
 ## Prototipo web
 
-Cuatro páginas servidas por la misma app, en <http://localhost:8000>. Reemplazan el
+Cinco páginas servidas por la misma app, en <http://localhost:8000>. Reemplazan el
 catálogo PDF y el grupo de WhatsApp «COMPROBANTES TRANSF.» — **no** cablean pagos en
 línea ni despacho.
 
 | Ruta | Quién | Para qué |
 |---|---|---|
-| `/` | cualquiera | El catálogo con el diseño del PDF impreso, con buscador |
+| `/` | cualquiera | El catálogo con el diseño del PDF impreso, buscador y filtro por categoría |
+| `/pedido` | vendedor, cliente | Arma el pedido desde el catálogo y lo envía |
 | `/vendedor` | vendedor | El formulario que reemplaza el mensaje de WhatsApp |
 | `/cobranza` | admin | Bandeja de comprobantes + descarga del Excel |
-| `/admin` | admin | Edita el catálogo celda por celda |
+| `/admin` | admin | Edita el catálogo celda por celda y cambia las fotos |
 
 Son **clientes de la API JSON**: piden el token a `/auth/login` y desde ahí llaman a los
 mismos endpoints documentados en `/docs`. No hay sesión de servidor ni datos incrustados
@@ -169,6 +225,14 @@ sin build y sin CDN: se abren en cualquier navegador sin instalar nada.
 El vendedor puede enviar un comprobante incompleto a propósito: se guarda marcado con lo
 que falta (`FALTA MONTO`, `FALTA FACTURA`, …), con los mismos estados y colores que
 cobranza ya lee en el Excel de hoy. Perder el aviso es peor que registrarlo a medias.
+
+En `/pedido` las cantidades se escriben **en envases**, no en unidades: el vendedor pone
+«2 cajas» y la página envía `2 × multiplo_venta`, así que la cantidad es múltiplo válido
+por construcción y no hay forma de tipear un número que el backend vaya a rechazar. El
+carrito vive en `sessionStorage` con un `client_uuid` que **no** se regenera entre
+intentos: si se corta la señal al enviar, reintentar cae en la idempotencia del backend
+en vez de duplicar el pedido. La página tampoco calcula IVA — muestra el neto y después
+los totales que devolvió el servidor, porque la regla del impuesto vive en un solo lugar.
 
 ## Desarrollo
 

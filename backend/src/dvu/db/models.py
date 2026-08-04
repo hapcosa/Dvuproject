@@ -53,6 +53,48 @@ class CatalogoFuente(Base, TimestampMixin):
     __table_args__ = (UniqueConstraint("sha256", name="uq_catalogo_fuente_sha256"),)
 
 
+class CatalogoPagina(Base, TimestampMixin):
+    """Una página del catálogo que es diseño, no tabla: portada, oferta, contraportada.
+
+    No se redibujan: se guarda la página original recortada del PDF (`key_pdf`) y una
+    vista previa en PNG para la web (`key_png`). Al emitir el catálogo se reinsertan en
+    su lugar, así que salen idénticas a la imprenta y no una imitación.
+    """
+
+    __tablename__ = "catalogo_pagina"
+
+    id: Mapped[pk]
+    archivo: Mapped[str] = mapped_column(String(255), nullable=False)
+    pagina: Mapped[int] = mapped_column(Integer, nullable=False)
+    #: `portada`, `promocion` o `contraportada`.
+    tipo: Mapped[str] = mapped_column(String(32), nullable=False)
+    key_pdf: Mapped[str] = mapped_column(String(255), nullable=False)
+    key_png: Mapped[str] = mapped_column(String(255), nullable=False)
+    #: El administrador puede sacar una oferta vencida sin borrar el registro.
+    activa: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("archivo", "pagina", name="uq_catalogo_pagina_archivo_pagina"),
+        CheckConstraint(
+            "tipo IN ('portada','promocion','contraportada')", name="ck_catalogo_pagina_tipo"
+        ),
+    )
+
+
+class CatalogoActivo(Base, TimestampMixin):
+    """Activos gráficos sueltos de la plantilla, por clave: `banner_par`, `banner_impar`.
+
+    Es una tabla clave-valor a propósito. Son tres o cuatro imágenes de maqueta y darles
+    una columna a cada una obligaría a migrar el esquema cada vez que el diseño cambia.
+    """
+
+    __tablename__ = "catalogo_activo"
+
+    id: Mapped[pk]
+    clave: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    key_objeto: Mapped[str] = mapped_column(String(255), nullable=False)
+
+
 class CatalogoFilaCruda(Base, TimestampMixin):
     """Salida literal del extractor, antes de normalizar.
 
@@ -123,12 +165,18 @@ class Producto(Base, UUIDMixin, TimestampMixin):
 
     precio_lista_clp: Mapped[Decimal] = mapped_column(Numeric(12, 0), nullable=False)
     imagen_key: Mapped[str | None] = mapped_column(String(255))
+    #: En el catálogo impreso la marca es el logo del proveedor, no su nombre escrito.
+    #: Por eso `marca` está casi siempre vacía: el dato estaba en un PNG.
+    marca_logo_key: Mapped[str | None] = mapped_column(String(255))
 
     activo: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
     alias: Mapped[list[ProductoAlias]] = relationship(
         back_populates="producto", cascade="all, delete-orphan"
     )
+    # `selectin` y no `select`: el catálogo se lista de a 50 filas y cada una muestra su
+    # categoría. La tabla tiene diez filas, así que es una consulta más, no cincuenta.
+    categoria: Mapped[Categoria | None] = relationship(lazy="selectin")
 
     __table_args__ = (
         CheckConstraint("multiplo_venta >= 1", name="ck_producto_multiplo_positivo"),

@@ -68,10 +68,17 @@
     <form class="buscador" id="buscador">
       <input type="search" id="q" placeholder="Descripción, SKU o código del proveedor"
              aria-label="Buscar producto">
+      <select id="categoria" aria-label="Categoría">
+        <option value="">Todas las categorías</option>
+        <option value="__sin__">— Sin categoría —</option>
+      </select>
       <button type="submit">Buscar</button>
     </form>
     <p class="pista">
       Haz clic en una celda con fondo claro para editarla. Sale del campo y se guarda.
+      La categoría se elige en la lista de cada fila; lo que asignes acá
+      <strong>manda sobre la clasificación automática</strong>, que sólo toca los
+      productos que quedaron sin categoría.
     </p>
   </section>
 
@@ -79,13 +86,16 @@
     <table class="datos editable">
       <thead>
         <tr>
-          <th>SKU</th><th>Descripción</th><th>Múltiplo</th><th>Envase</th>
-          <th>Marca</th><th>Medida</th><th>Precio</th><th>Códigos</th><th></th>
+          <th>SKU</th><th>Foto</th><th>Descripción</th><th>Categoría</th><th>Múltiplo</th>
+          <th>Envase</th><th>Marca</th><th>Medida</th><th>Precio</th><th>Códigos</th><th></th>
         </tr>
       </thead>
-      <tbody id="filas"><tr><td colspan="9">Busca un producto para editarlo.</td></tr></tbody>
+      <tbody id="filas"><tr><td colspan="11">Busca un producto para editarlo.</td></tr></tbody>
     </table>
   </div>
+
+  <!-- Uno solo para toda la tabla: el botón de cada fila lo dispara. -->
+  <input type="file" id="archivo-foto" accept="image/jpeg,image/png,image/webp" hidden>
 
   <div class="paginacion">
     <button class="plano" id="anterior">‹ Anterior</button>
@@ -98,11 +108,20 @@
 {% block script %}
 <script>
 const POR_PAGINA = 25;
+const API = document.querySelector('meta[name="dvu-api"]').content;
 let offset = 0;
 let consulta = "";
+let categoria = "";
+// La URL de la foto no cambia al reemplazarla, así que el navegador seguiría mostrando
+// la vieja. Este contador la ensucia después de cada subida.
+let version = 0;
+// El árbol completo, para pintar la lista de cada fila. Incluye las vacías: acá se
+// asigna, y una categoría recién creada empieza sin productos.
+let categorias = [];
 
 const filas = document.getElementById("filas");
 const mensaje = document.getElementById("mensaje");
+const selector = document.getElementById("archivo-foto");
 
 /** Celda editable in situ. `campo` es el nombre que espera PATCH /productos/{sku}. */
 function celda(producto, campo, tipo = "texto") {
@@ -119,7 +138,22 @@ function fila(p) {
   return `
     <tr data-sku="${DVU.escapar(p.sku)}">
       <td><code>${DVU.escapar(p.sku)}</code></td>
+      <td class="col-imagen">
+        ${p.imagen_key
+          ? `<img class="miniatura" loading="lazy" alt=""
+                  src="${API}/productos/${encodeURIComponent(p.sku)}/imagen?v=${version}">`
+          : '<div class="sin-imagen">sin foto</div>'}
+        <button class="plano" data-foto="${DVU.escapar(p.sku)}">cambiar</button>
+      </td>
       ${celda(p, "descripcion")}
+      <td>
+        <select data-categoria="${DVU.escapar(p.sku)}">
+          <option value="">— sin categoría —</option>
+          ${categorias.map((c) =>
+            `<option value="${DVU.escapar(c.slug)}"${c.slug === p.categoria_slug ? " selected" : ""}
+             >${DVU.escapar(c.nombre)}</option>`).join("")}
+        </select>
+      </td>
       ${celda(p, "multiplo_venta", "entero")}
       ${celda(p, "envase")}
       ${celda(p, "marca")}
@@ -134,16 +168,32 @@ function fila(p) {
     </tr>`;
 }
 
+async function cargarCategorias() {
+  try {
+    categorias = await DVU.pedir("/categorias?con_vacias=true");
+    document.getElementById("categoria").insertAdjacentHTML(
+      "beforeend",
+      categorias.map((c) =>
+        `<option value="${DVU.escapar(c.slug)}">${DVU.escapar(c.nombre)} (${c.productos})</option>`
+      ).join("")
+    );
+  } catch { /* sin árbol se sigue editando todo lo demás */ }
+}
+
 async function cargar() {
   mensaje.hidden = true;
-  filas.innerHTML = '<tr><td colspan="9">Cargando…</td></tr>';
+  filas.innerHTML = '<tr><td colspan="11">Cargando…</td></tr>';
   const p = new URLSearchParams({ limite: POR_PAGINA, offset });
   if (consulta) p.set("q", consulta);
+  // «Sin categoría» es la bandeja de revisión del clasificador: lo que ninguna regla
+  // reconoció, que es justo lo que hay que asignar a mano.
+  if (categoria === "__sin__") p.set("sin_categoria", "true");
+  else if (categoria) p.set("categoria", categoria);
   try {
     const pagina = await DVU.pedir(`/productos?${p}`);
     filas.innerHTML = pagina.items.length
       ? pagina.items.map(fila).join("")
-      : '<tr><td colspan="9">Sin resultados.</td></tr>';
+      : '<tr><td colspan="11">Sin resultados.</td></tr>';
     const desde = pagina.total ? offset + 1 : 0;
     const hasta = Math.min(offset + POR_PAGINA, pagina.total);
     document.getElementById("rango").textContent =
@@ -190,6 +240,21 @@ filas.addEventListener("focusout", async (evento) => {
   }
 });
 
+// La categoría se guarda al elegirla: es una lista, no hay nada que confirmar.
+filas.addEventListener("change", async (evento) => {
+  const sku = evento.target.dataset?.categoria;
+  if (!sku) return;
+  try {
+    await DVU.pedir(`/productos/${encodeURIComponent(sku)}`, {
+      method: "PATCH", body: { categoria_slug: evento.target.value || null },
+    });
+    DVU.avisar(mensaje, `Categoría de ${sku} guardada.`, "ok");
+  } catch (e) {
+    DVU.avisar(mensaje, e.message, "error");
+    cargar();
+  }
+});
+
 // Enter guarda en vez de meter un salto de línea dentro de la celda.
 filas.addEventListener("keydown", (evento) => {
   if (evento.key === "Enter" && evento.target.classList?.contains("edit")) {
@@ -200,6 +265,14 @@ filas.addEventListener("keydown", (evento) => {
 
 filas.addEventListener("click", async (evento) => {
   const datos = evento.target.dataset || {};
+
+  if (datos.foto) {
+    // El input recuerda a qué producto le corresponde el archivo que se elija.
+    selector.dataset.sku = datos.foto;
+    selector.value = "";
+    selector.click();
+    return;
+  }
 
   if (datos.alias) {
     const codigo = prompt(`Código de proveedor para ${datos.alias}:`);
@@ -229,6 +302,25 @@ filas.addEventListener("click", async (evento) => {
     }
   }
 });
+
+selector.onchange = async () => {
+  const archivo = selector.files[0];
+  const sku = selector.dataset.sku;
+  if (!archivo || !sku) return;
+
+  const cuerpo = new FormData();
+  cuerpo.append("archivo", archivo);
+  try {
+    await DVU.pedir(`/productos/${encodeURIComponent(sku)}/imagen`, {
+      method: "POST", body: cuerpo,
+    });
+    version += 1;
+    DVU.avisar(mensaje, `Foto de ${sku} actualizada.`, "ok");
+    cargar();
+  } catch (e) {
+    DVU.avisar(mensaje, e.message, "error");
+  }
+};
 
 document.getElementById("form-nuevo").onsubmit = async (evento) => {
   evento.preventDefault();
@@ -264,6 +356,7 @@ document.getElementById("form-nuevo").onsubmit = async (evento) => {
 document.getElementById("buscador").onsubmit = (evento) => {
   evento.preventDefault();
   consulta = document.getElementById("q").value.trim();
+  categoria = document.getElementById("categoria").value;
   offset = 0;
   cargar();
 };
@@ -276,6 +369,7 @@ document.getElementById("siguiente").onclick = () => {
   cargar();
 };
 
-DVU.proteger({ rol: ["admin"], alIngresar: cargar });
+// El árbol primero: la tabla lo necesita para pintar la lista de cada fila.
+DVU.proteger({ rol: ["admin"], alIngresar: () => cargarCategorias().then(cargar) });
 </script>
 {% endblock %}

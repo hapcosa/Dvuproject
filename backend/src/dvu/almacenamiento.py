@@ -31,6 +31,11 @@ EXTENSIONES = {
 }
 TAMANO_MAXIMO_BYTES = 10 * 1024 * 1024
 
+#: Foto de producto del catálogo. Más estrecho que el comprobante a propósito: esto se
+#: pinta en un `<img>` del catálogo, así que un PDF no sirve y HEIC no lo muestra ningún
+#: navegador —lo manda el iPhone tal cual, y quedaría un hueco en la grilla—.
+TIPOS_IMAGEN_PRODUCTO = frozenset({"image/jpeg", "image/png", "image/webp"})
+
 
 class TipoNoPermitido(Exception):
     pass
@@ -44,6 +49,8 @@ class Almacen(Protocol):
     def guardar(self, key: str, datos: BinaryIO, content_type: str) -> str: ...
 
     def url_firmada(self, key: str, *, segundos: int = 300) -> str: ...
+
+    def leer(self, key: str) -> bytes | None: ...
 
 
 class AlmacenS3:
@@ -77,6 +84,17 @@ class AlmacenS3:
         )
         return url
 
+    def leer(self, key: str) -> bytes | None:
+        """Baja el objeto. `None` si no está: una foto faltante no rompe el catálogo."""
+        from botocore.exceptions import ClientError
+
+        try:
+            respuesta = self._cliente.get_object(Bucket=self._bucket, Key=key)
+        except ClientError:
+            return None
+        contenido: bytes = respuesta["Body"].read()
+        return contenido
+
 
 class AlmacenLocal:
     """Respaldo en disco para desarrollo y tests. No firma nada: devuelve la ruta."""
@@ -93,6 +111,10 @@ class AlmacenLocal:
 
     def url_firmada(self, key: str, *, segundos: int = 300) -> str:
         return f"file://{self._raiz / key}"
+
+    def leer(self, key: str) -> bytes | None:
+        ruta = self._raiz / key
+        return ruta.read_bytes() if ruta.is_file() else None
 
 
 def get_almacen() -> Almacen:
@@ -117,6 +139,31 @@ def validar_comprobante(content_type: str | None, tamano: int | None) -> str:
     return EXTENSIONES[content_type]
 
 
+def validar_imagen_producto(content_type: str | None, tamano: int | None) -> str:
+    """Devuelve la extensión a usar. Lanza si el archivo no sirve como foto de catálogo."""
+    if content_type not in TIPOS_IMAGEN_PRODUCTO:
+        raise TipoNoPermitido(
+            f"Tipo '{content_type}' no permitido para una foto de producto; se aceptan: "
+            + ", ".join(sorted(TIPOS_IMAGEN_PRODUCTO))
+        )
+    if tamano is not None and tamano > TAMANO_MAXIMO_BYTES:
+        raise ArchivoDemasiadoGrande(
+            f"La imagen pesa {tamano} bytes; el máximo es {TAMANO_MAXIMO_BYTES}"
+        )
+    return EXTENSIONES[content_type]
+
+
 def key_comprobante(pago_uuid: uuid_lib.UUID, extension: str) -> str:
     """Los comprobantes van bajo su propio prefijo: no se sirven junto al catálogo."""
     return f"comprobantes/{pago_uuid}.{extension}"
+
+
+def key_imagen_producto(sku: str, extension: str) -> str:
+    """Foto subida a mano, bajo el mismo prefijo que las que salen del PDF.
+
+    Va por SKU y no por hash: resubir la foto de un producto pisa la anterior en vez de
+    ir dejando objetos huérfanos en el bucket (salvo que cambie el formato, caso en que
+    el archivo viejo queda ahí sin que nadie lo referencie). Las del extractor sí van
+    por hash, porque allá un mismo archivo sirve a varias filas.
+    """
+    return f"catalogo/{sku}.{extension}"
