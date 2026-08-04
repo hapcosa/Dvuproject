@@ -12,6 +12,7 @@ import typer
 from dvu.almacenamiento import get_almacen
 from dvu.carga.cartola import cartola_de_prueba
 from dvu.carga.catalogo import cargar_catalogo
+from dvu.carga.catalogo_impreso import exportar_catalogo_pdf
 from dvu.carga.categorias import clasificar_catalogo
 from dvu.carga.excel import exportar_excel
 from dvu.carga.seed import SeedEnProduccion, sembrar
@@ -191,6 +192,33 @@ def exportar(
         )
     destino.write_bytes(contenido)
     typer.echo(f"Excel escrito en {destino} ({len(contenido) // 1024} KB)")
+
+
+@app.command("catalogo-pdf")
+def catalogo_pdf_cmd(
+    salida: Annotated[Path | None, typer.Option(help="Ruta del .pdf a escribir")] = None,
+    categoria: Annotated[
+        str | None, typer.Option(help="Slug de la categoría; vacío = catálogo completo")
+    ] = None,
+    sin_imagenes: Annotated[
+        bool,
+        typer.Option("--sin-imagenes", help="Lista de precios: sin fotos, pesa cien veces menos"),
+    ] = False,
+) -> None:
+    """Exporta el catálogo a PDF con el diseño del impreso.
+
+    Las fotos salen del almacén, donde las dejó `cargar-catalogo --con-imagenes`. Sin
+    MinIO configurado se leen del respaldo en disco, y las que falten van con el guion
+    de dato faltante en vez de inventarse.
+    """
+    sufijo = f"-{categoria}" if categoria else ""
+    destino = salida or Path(f"catalogo-dvu{sufijo}-{datetime.now(UTC):%Y%m%d}.pdf")
+    with get_sessionmaker()() as session:
+        contenido = exportar_catalogo_pdf(
+            session, get_almacen(), categoria=categoria, con_imagenes=not sin_imagenes
+        )
+    destino.write_bytes(contenido)
+    typer.echo(f"PDF escrito en {destino} ({len(contenido) // 1024} KB)")
 
 
 @app.command()

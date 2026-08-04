@@ -14,6 +14,8 @@
   <select id="categoria" aria-label="Categoría"><option value="">Todas las categorías</option></select>
   <button type="submit">Buscar</button>
   <button type="button" class="plano" id="limpiar">Limpiar</button>
+  <button type="button" class="plano" id="pdf" title="Descarga lo que estás viendo, con el diseño del catálogo impreso">↓ PDF</button>
+  <button type="button" class="plano" id="pdf-precios" title="Sin fotos: pesa cien veces menos y sirve para mandar por WhatsApp">↓ Lista de precios</button>
 </form>
 
 <div id="mensaje" class="aviso info" hidden></div>
@@ -127,6 +129,36 @@ document.getElementById("categoria").onchange = () => {
   offset = 0;
   cargar();
 };
+
+/** El PDF sale con el mismo filtro que está en pantalla: lo que el vendedor ve es lo
+ *  que se lleva. Las fotos las pone el servidor desde el almacén; acá no hay nada que
+ *  buscar en el PDF original.
+ *
+ *  Pide sesión aunque el catálogo sea público: generarlo entero cuesta segundos de CPU
+ *  y cientos de lecturas al almacén. */
+async function bajarPdf(conImagenes) {
+  const p = new URLSearchParams();
+  if (consulta) p.set("q", consulta);
+  if (categoria) p.set("categoria", categoria);
+  if (!conImagenes) p.set("con_imagenes", "false");
+
+  const boton = document.getElementById(conImagenes ? "pdf" : "pdf-precios");
+  const original = boton.textContent;
+  boton.disabled = true;
+  boton.textContent = "Generando…";
+  try {
+    const nombre = `catalogo-dvu${categoria ? "-" + categoria : ""}.pdf`;
+    await DVU.descargar(`/reportes/catalogo.pdf?${p}`, nombre);
+  } catch (e) {
+    const mensaje = document.getElementById("mensaje");
+    DVU.avisar(mensaje, `${e.message} — para bajar el PDF hay que ingresar.`, "error");
+  } finally {
+    boton.disabled = false;
+    boton.textContent = original;
+  }
+}
+document.getElementById("pdf").onclick = () => bajarPdf(true);
+document.getElementById("pdf-precios").onclick = () => bajarPdf(false);
 
 /** El árbol no viene del PDF: sale de las reglas que aplica `make clasificar`. Las
  *  categorías vacías no se listan, y lo que ninguna regla reconoció se sigue

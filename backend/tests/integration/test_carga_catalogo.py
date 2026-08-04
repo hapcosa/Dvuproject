@@ -246,13 +246,18 @@ class AlmacenEspia:
 
     def __init__(self) -> None:
         self.subidos: list[tuple[str, str]] = []
+        self.contenido: dict[str, bytes] = {}
 
     def guardar(self, key: str, datos: BinaryIO, content_type: str) -> str:
         self.subidos.append((key, content_type))
+        self.contenido[key] = datos.read()
         return key
 
     def url_firmada(self, key: str, *, segundos: int = 300) -> str:
         return f"https://ejemplo/{key}"
+
+    def leer(self, key: str) -> bytes | None:
+        return self.contenido.get(key)
 
 
 def test_las_fotos_se_suben_una_vez_y_se_asocian_a_cada_fila(

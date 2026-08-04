@@ -144,6 +144,51 @@ Decisiones que sostienen eso:
 En `/admin` el filtro «— Sin categoría —» es exactamente la bandeja de revisión del
 clasificador: la lista de lo que falta asignar a mano.
 
+## Volver a PDF
+
+El catálogo web se exporta a PDF con el diseño del impreso, desde los dos botones del
+buscador o con `make catalogo-pdf`.
+
+**Las fotos no hay que ir a buscarlas al PDF original.** El extractor de Fase 0 ya las
+sacó —JPEG embebidos a ~300 ppi, deduplicados por sha256— y `cargar-catalogo
+--con-imagenes` las dejó en el almacén con su `imagen_key`. El exportador las baja de
+ahí, una sola vez por archivo aunque la compartan veinte productos de la misma familia.
+
+La geometría de las siete columnas sale de `extractor/layout.py`: los mismos rangos de X
+con los que se *lee* el original. Leer y volver a emitir usan un único juego de números,
+así que recalibrar una edición nueva se hace en un solo lugar.
+
+Lo que **no** es: una copia página por página. El original salió de CorelDRAW con
+portadas y saltos armados a mano; acá el contenido es lo que hay en la base —que ya trae
+las correcciones que el PDF impreso no tiene— y la paginación la decide el contenido. Lo
+que se conserva es la identidad visual: la banda roja con el folio, el encabezado azul
+repetido en cada página y los bordes rojos de las celdas.
+
+Dos modos:
+
+| Modo | Peso | Páginas | Tiempo | Para qué |
+|---|---|---|---|---|
+| Con fotos | ~24 MB | 142 | ~14 s | Para imprimir o dejar en el mostrador |
+| Lista de precios | ~250 KB | 51 | ~4 s | Para mandar por WhatsApp |
+
+Decisiones:
+
+- **El filtro de la pantalla viaja al PDF.** Lo que el vendedor ve es lo que se lleva:
+  «Gasfitería» son 2 páginas, no 142.
+- **Sin fotos se saca la columna «Imagen»**, no se deja en blanco. Una columna vacía a lo
+  largo de 51 páginas no informa nada y le roba ancho a la descripción.
+- **Una foto faltante o corrupta no tumba el catálogo.** Se verifica al bajarla, antes de
+  armar la página: reportlab abre la imagen en medio del maquetado, y un JPEG truncado se
+  llevaría puestas las 142 páginas por una sola foto mala de novecientas.
+- **Pide sesión, aunque el catálogo web sea público.** Generarlo entero cuesta ~14 s de
+  CPU y cientos de lecturas al almacén; abierto al mundo es una palanca de denegación de
+  servicio gratis. Cualquier rol sirve.
+- **Los productos desactivados no se imprimen.** Un catálogo con descontinuados adentro
+  genera pedidos que después no se pueden despachar.
+- **El pie dice que los precios son netos.** El cliente descuenta IVA y el precio de
+  lista no lo incluye; dejarlo implícito en un papel que circula es cómo nacen los
+  reclamos por diferencia de monto.
+
 ## El pedido desde el catálogo
 
 `/pedido` reemplaza el mensaje de WhatsApp con el pedido: busca en el catálogo (por
@@ -171,7 +216,8 @@ make clasificar  # arma el árbol de categorías sobre el catálogo ya cargado
 Después, en <http://localhost:8000>:
 
 1. `/` — busca «codo» o pega un código de proveedor (`PR/49573`, `KM521`), o filtrá por
-   categoría en el desplegable.
+   categoría en el desplegable. Con sesión iniciada, «↓ PDF» baja lo que estás viendo
+   con el diseño del impreso, y «↓ Lista de precios» lo mismo sin fotos.
 2. `/pedido` — entra como `vendedor@dvu.cl` / `dvu-dev-1234`, filtra por «Gasfitería»,
    agrega dos envases de un codo, elige el cliente y envía. Probá recargar la página
    antes de enviar: el carrito sigue ahí.

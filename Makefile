@@ -125,6 +125,12 @@ exportar: ## Excel de ventas, detalle y pagos en ./data/exports
 	$(COMPOSE) run --rm api python -m dvu.cli exportar \
 	  --salida data/exports/dvu-ventas-$$(date +%Y%m%d).xlsx
 
+.PHONY: catalogo-pdf
+catalogo-pdf: ## Catálogo en PDF con el diseño del impreso, en ./data/exports
+	@mkdir -p data/exports
+	$(COMPOSE) run --rm api python -m dvu.cli catalogo-pdf \
+	  --salida data/exports/catalogo-dvu-$$(date +%Y%m%d).pdf
+
 .PHONY: backup
 backup: ## Backup de la BD a ./data/backups
 	@mkdir -p data/backups

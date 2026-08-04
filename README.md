@@ -60,6 +60,7 @@ defecto, así que el stack levanta completo sin credenciales de terceros.
 make extract              # catalago/*.pdf -> data/extraccion/*.jsonl + fotos + reporte
 make cargar-catalogo      # data/extraccion -> producto, producto_alias, fotos al almacén
 make clasificar           # arma el árbol de categorías y clasifica por descripción
+make catalogo-pdf         # vuelve a emitir el catálogo en PDF con el diseño del impreso
 ```
 
 `make extract` deja esto en `data/extraccion/`:
@@ -98,6 +99,26 @@ La clasificación automática **no pisa lo que asignó una persona**: sólo toca
 productos sin categoría. `--reclasificar` fuerza la corrida completa y existe para
 cuando cambian las reglas; es explícito porque destruye correcciones.
 
+### Volver a emitir el catálogo en PDF
+
+`make catalogo-pdf` genera el impreso de nuevo, con el diseño del original y los precios
+que hay hoy en la base —correcciones del administrador incluidas—. **No hay que ir a
+buscar las fotos**: ya están en el almacén desde `cargar-catalogo --con-imagenes`, y este
+paso las lee de ahí.
+
+La geometría sale de `extractor/layout.py`, el mismo archivo con el que se *lee* el PDF
+original. Si la próxima edición mueve una columna, se recalibra en un lugar y las dos
+puntas quedan consistentes.
+
+| Modo | Peso | Páginas | Tiempo | Para qué |
+|---|---|---|---|---|
+| Con fotos (por defecto) | ~24 MB | 142 | ~14 s | El catálogo para imprimir o dejar en el mostrador |
+| `--sin-imagenes` | ~250 KB | 51 | ~4 s | La lista de precios, que es lo que se manda por WhatsApp |
+
+Sin fotos la columna «Imagen» no se deja en blanco: se saca, y su ancho va a la
+descripción. Una foto que falta en el almacén, o que está corrupta, deja el guion de dato
+faltante y **no** tumba el resto del catálogo.
+
 La carga es **idempotente**: repetirla con el mismo JSONL deja la base igual. Nada se
 borra —los productos ausentes de una edición se marcan inactivos con
 `--desactivar-ausentes`— porque pueden estar referenciados en pedidos históricos.
@@ -128,6 +149,7 @@ Todo cuelga de `/api/v1`.
 | `GET` | `/pagos` | cualquiera | Bandeja; `?estado=pendiente_revision` es la de excepciones |
 | `POST` | `/pagos/{uuid}/estado` | admin | Verifica, rechaza o manda a revisión |
 | `GET` | `/reportes/ventas.xlsx` | admin | El Excel del dueño, generado al vuelo |
+| `GET` | `/reportes/catalogo.pdf` | cualquiera | El catálogo impreso; filtra por `categoria`/`q` |
 | `POST` | `/productos` | admin | Alta manual de lo que no viene en el PDF |
 | `PATCH` | `/productos/{sku}` | admin | Corrige la ficha; `activo=false` la desactiva |
 | `POST` | `/productos/{sku}/alias` | admin | Suma un código de proveedor |

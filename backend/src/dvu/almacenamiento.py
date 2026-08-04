@@ -50,6 +50,8 @@ class Almacen(Protocol):
 
     def url_firmada(self, key: str, *, segundos: int = 300) -> str: ...
 
+    def leer(self, key: str) -> bytes | None: ...
+
 
 class AlmacenS3:
     """MinIO en desarrollo, S3 (o compatible) en producción."""
@@ -82,6 +84,17 @@ class AlmacenS3:
         )
         return url
 
+    def leer(self, key: str) -> bytes | None:
+        """Baja el objeto. `None` si no está: una foto faltante no rompe el catálogo."""
+        from botocore.exceptions import ClientError
+
+        try:
+            respuesta = self._cliente.get_object(Bucket=self._bucket, Key=key)
+        except ClientError:
+            return None
+        contenido: bytes = respuesta["Body"].read()
+        return contenido
+
 
 class AlmacenLocal:
     """Respaldo en disco para desarrollo y tests. No firma nada: devuelve la ruta."""
@@ -98,6 +111,10 @@ class AlmacenLocal:
 
     def url_firmada(self, key: str, *, segundos: int = 300) -> str:
         return f"file://{self._raiz / key}"
+
+    def leer(self, key: str) -> bytes | None:
+        ruta = self._raiz / key
+        return ruta.read_bytes() if ruta.is_file() else None
 
 
 def get_almacen() -> Almacen:
