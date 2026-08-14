@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import Field, field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 Entorno = Literal["development", "test", "staging", "production"]
 
@@ -28,7 +28,10 @@ class Settings(BaseSettings):
 
     # --- api ---
     api_prefix: str = "/api/v1"
-    cors_origins: list[str] = Field(default_factory=list)
+    #: `NoDecode` desactiva el parseo JSON que pydantic-settings aplica por defecto a
+    #: los tipos complejos. Sin esto, el valor separado por comas del .env explota en
+    #: el source (SettingsError) antes de que corra `_split_csv`.
+    cors_origins: Annotated[list[str], NoDecode] = Field(default_factory=list)
 
     # --- seguridad ---
     secret_key: str = "cambiame-openssl-rand-hex-32"  # noqa: S105 — placeholder, no un secreto

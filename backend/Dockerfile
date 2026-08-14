@@ -43,8 +43,11 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # ---------- dev ----------
 FROM deps AS dev
 
+# Las herramientas de desarrollo son un *extra* (`[project.optional-dependencies] dev`),
+# no un dependency-group: sin `--extra dev` uv no instala ni pytest ni ruff ni mypy.
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --no-install-project 2>/dev/null || true
+    uv sync --frozen --no-install-project --extra dev 2>/dev/null \
+    || uv sync --no-install-project --extra dev
 
 ENV PYTHONPATH=/app/src
 COPY . /app

@@ -513,6 +513,44 @@ table.editable .edit.guardado { background: #dcfce7; border-left-color: var(--ve
   text-align: center;
 }
 
+/* --- páginas de diseño, en administración -------------------------------- */
+
+.tira-paginas {
+  display: flex;
+  gap: 12px;
+  overflow-x: auto;
+  padding: 12px 0 4px;
+}
+.pagina-diseno {
+  margin: 0;
+  flex: 0 0 auto;
+  width: 132px;
+}
+.pagina-diseno img {
+  display: block;
+  width: 132px;
+  border: 1px solid var(--gris-borde);
+  background: var(--papel);
+  box-shadow: var(--sombra);
+}
+.pagina-diseno figcaption {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-top: 6px;
+}
+.pagina-diseno select { font-size: 11px; }
+/* Una página quitada sigue a la vista, apagada: es lo que permite reponerla. */
+.pagina-diseno.inactiva img { opacity: 0.35; filter: grayscale(1); }
+.pagina-diseno.inactiva figcaption::before {
+  content: "fuera del catálogo";
+  font-size: 10px;
+  color: var(--rojo);
+  text-align: center;
+}
+
+.alta-pagina { margin-top: 16px; border-top: 1px solid var(--gris-borde); padding-top: 16px; }
+
 @media (max-width: 720px) {
   .banda { height: 72px; }
   .banda h1 { font-size: 24px; }

@@ -18,6 +18,41 @@
   </section>
 
   <section class="tarjeta">
+    <h3>Páginas de diseño</h3>
+    <p class="pista">
+      La portada, las hojas de oferta y la contraportada: lo que en el catálogo es arte y
+      no tabla. Quitar una la saca de la web y del PDF exportado, pero
+      <strong>no la borra</strong> — una oferta que sale en agosto suele volver, y se
+      repone con «Reponer».
+    </p>
+    <div class="tira-paginas" id="paginas-diseno">Cargando…</div>
+
+    <form id="form-pagina" class="alta-pagina">
+      <div class="rejilla">
+        <div class="campo">
+          <label for="pagina-tipo">Dónde va</label>
+          <select id="pagina-tipo" name="tipo">
+            <option value="portada">Portada (al principio)</option>
+            <option value="promocion">Oferta (en medio)</option>
+            <option value="contraportada">Contraportada (al final)</option>
+          </select>
+        </div>
+        <div class="campo ancho">
+          <label for="pagina-archivo">Archivo</label>
+          <input id="pagina-archivo" name="archivo" type="file" required
+                 accept="application/pdf,image/jpeg,image/png,image/webp">
+        </div>
+      </div>
+      <p class="pista">
+        Se acepta PDF o imagen. <strong>Si tienes el PDF, súbelo</strong>: conserva el
+        vector y el texto del original, y el catálogo exportado sale idéntico a imprenta.
+        Desde una imagen se arma igual, pero queda rasterizada.
+      </p>
+      <button type="submit">Agregar página</button>
+    </form>
+  </section>
+
+  <section class="tarjeta">
     <h3>Agregar producto</h3>
     <form id="form-nuevo">
       <div class="rejilla">
@@ -369,7 +404,104 @@ document.getElementById("siguiente").onclick = () => {
   cargar();
 };
 
+/* ---------------------------------------------------------------- páginas de diseño */
+
+const ROTULO = { portada: "Portada", promocion: "Oferta", contraportada: "Contraportada" };
+const tiraPaginas = document.getElementById("paginas-diseno");
+// Igual que las fotos: la vista previa vive en una URL que no cambia al reemplazarla.
+let versionPagina = 0;
+
+function tarjetaPagina(p) {
+  return `
+    <figure class="pagina-diseno${p.activa ? "" : " inactiva"}" data-pagina="${p.id}">
+      <img loading="lazy" alt="${DVU.escapar(ROTULO[p.tipo] || p.tipo)}"
+           src="${API}/catalogo/paginas/${p.id}/imagen?v=${versionPagina}">
+      <figcaption>
+        <select data-tipo-de="${p.id}" aria-label="Dónde va">
+          ${Object.entries(ROTULO).map(([valor, texto]) =>
+            `<option value="${valor}"${valor === p.tipo ? " selected" : ""}>${texto}</option>`
+          ).join("")}
+        </select>
+        <button class="plano" data-quitar="${p.id}"
+          >${p.activa ? "Quitar" : "Reponer"}</button>
+      </figcaption>
+    </figure>`;
+}
+
+async function cargarPaginas() {
+  try {
+    const paginas = await DVU.pedir("/catalogo/paginas?incluir_inactivas=true");
+    tiraPaginas.innerHTML = paginas.length
+      ? paginas.map(tarjetaPagina).join("")
+      : '<p class="pista">Todavía no hay páginas de diseño.</p>';
+  } catch (e) {
+    tiraPaginas.innerHTML = "";
+    DVU.avisar(mensaje, e.message, "error");
+  }
+}
+
+tiraPaginas.addEventListener("click", async (evento) => {
+  const id = evento.target.dataset?.quitar;
+  if (!id) return;
+  // El mismo botón repone: si está inactiva, PATCH la vuelve a activar.
+  const inactiva = evento.target.closest(".pagina-diseno").classList.contains("inactiva");
+  try {
+    if (inactiva) {
+      await DVU.pedir(`/catalogo/paginas/${id}`, { method: "PATCH", body: { activa: true } });
+      DVU.avisar(mensaje, "La página vuelve a salir en el catálogo.", "ok");
+    } else {
+      await DVU.pedir(`/catalogo/paginas/${id}`, { method: "DELETE" });
+      DVU.avisar(mensaje, "Página quitada del catálogo. La ficha se conserva.", "ok");
+    }
+    cargarPaginas();
+  } catch (e) {
+    DVU.avisar(mensaje, e.message, "error");
+  }
+});
+
+tiraPaginas.addEventListener("change", async (evento) => {
+  const id = evento.target.dataset?.tipoDe;
+  if (!id) return;
+  try {
+    await DVU.pedir(`/catalogo/paginas/${id}`, {
+      method: "PATCH", body: { tipo: evento.target.value },
+    });
+    DVU.avisar(mensaje, "Posición de la página guardada.", "ok");
+    cargarPaginas();
+  } catch (e) {
+    DVU.avisar(mensaje, e.message, "error");
+    cargarPaginas();
+  }
+});
+
+document.getElementById("form-pagina").onsubmit = async (evento) => {
+  evento.preventDefault();
+  const f = evento.target;
+  const archivo = f.archivo.files[0];
+  if (!archivo) return;
+
+  const cuerpo = new FormData();
+  cuerpo.append("archivo", archivo);
+  cuerpo.append("tipo", f.tipo.value);
+  const boton = f.querySelector("button");
+  boton.disabled = true;
+  try {
+    await DVU.pedir("/catalogo/paginas", { method: "POST", body: cuerpo });
+    DVU.avisar(mensaje, "Página agregada al catálogo.", "ok");
+    f.reset();
+    versionPagina += 1;
+    cargarPaginas();
+  } catch (e) {
+    DVU.avisar(mensaje, e.message, "error");
+  } finally {
+    boton.disabled = false;
+  }
+};
+
 // El árbol primero: la tabla lo necesita para pintar la lista de cada fila.
-DVU.proteger({ rol: ["admin"], alIngresar: () => cargarCategorias().then(cargar) });
+DVU.proteger({
+  rol: ["admin"],
+  alIngresar: () => cargarCategorias().then(cargar).then(cargarPaginas),
+});
 </script>
 {% endblock %}

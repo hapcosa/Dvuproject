@@ -13,8 +13,7 @@ from __future__ import annotations
 import uuid as uuid_lib
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
-from fastapi.responses import RedirectResponse
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile, status
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
@@ -29,6 +28,7 @@ from dvu.almacenamiento import (
     validar_imagen_producto,
 )
 from dvu.api.deps import exige_rol
+from dvu.api.objetos import responder_objeto
 from dvu.db.models import Categoria, Producto, ProductoAlias, Usuario
 from dvu.db.session import get_session
 
@@ -160,22 +160,22 @@ def obtener(sku: str, session: SessionDep) -> ProductoOut:
 
 
 @router.get("/{sku}/imagen")
-def imagen(sku: str, session: SessionDep, almacen: AlmacenDep) -> RedirectResponse:
-    """Redirige a la foto del producto.
+def imagen(sku: str, session: SessionDep, almacen: AlmacenDep) -> Response:
+    """Devuelve la foto del producto.
 
     A diferencia del comprobante de pago, la foto de catálogo no tiene nada reservado:
-    es la misma que está impresa en el PDF. Va igual por URL firmada porque el bucket es
-    uno solo y no se abre al público por comodidad.
+    es la misma que está impresa en el PDF. Sale por la API y no por URL firmada para que
+    se vea igual desde la LAN y desde la VPN — ver `dvu.api.objetos`.
     """
     producto = _buscar(session, sku)
     if producto.imagen_key is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail=f"{sku} no tiene imagen")
-    return RedirectResponse(almacen.url_firmada(producto.imagen_key), status_code=307)
+    return responder_objeto(almacen, producto.imagen_key)
 
 
 @router.get("/{sku}/marca")
-def logo_de_marca(sku: str, session: SessionDep, almacen: AlmacenDep) -> RedirectResponse:
-    """Redirige al logo del proveedor recortado del catálogo impreso.
+def logo_de_marca(sku: str, session: SessionDep, almacen: AlmacenDep) -> Response:
+    """Devuelve el logo del proveedor recortado del catálogo impreso.
 
     Va como endpoint propio y no como URL firmada dentro del listado porque la firma dura
     cinco minutos y la página del catálogo se deja abierta toda la mañana en el mesón.
@@ -183,7 +183,7 @@ def logo_de_marca(sku: str, session: SessionDep, almacen: AlmacenDep) -> Redirec
     producto = _buscar(session, sku)
     if producto.marca_logo_key is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail=f"{sku} no tiene logo de marca")
-    return RedirectResponse(almacen.url_firmada(producto.marca_logo_key), status_code=307)
+    return responder_objeto(almacen, producto.marca_logo_key)
 
 
 @router.post("", response_model=ProductoOut, status_code=status.HTTP_201_CREATED)

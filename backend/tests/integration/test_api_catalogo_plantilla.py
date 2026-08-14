@@ -47,7 +47,16 @@ def almacen(cliente_api: TestClient) -> Iterator[AlmacenDeMentira]:
 
 
 @pytest.fixture
-def plantilla(sesion: Session) -> dict[str, Any]:
+def plantilla(sesion: Session, almacen: AlmacenDeMentira) -> dict[str, Any]:
+    # El contenido va al almacén además de la key a la base: la API sirve los bytes, así
+    # que una fila sin objeto detrás es un 404 y no una imagen.
+    almacen.contenido.update(
+        {
+            "catalogo/plantilla/impar.png": b"\x89PNG banda impar",
+            "catalogo/paginas/p1.png": b"\x89PNG portada",
+            "catalogo/marcas/vinilit.png": b"\x89PNG logo vinilit",
+        }
+    )
     sesion.add(CatalogoActivo(clave="banner_impar", key_objeto="catalogo/plantilla/impar.png"))
     portada = CatalogoPagina(
         archivo="CAT PARTE 1.pdf",
@@ -89,8 +98,8 @@ def test_la_banda_del_impreso_se_sirve_por_paridad(
 ) -> None:
     respuesta = cliente_api.get(f"{PREFIJO}/catalogo/banner/impar", follow_redirects=False)
 
-    assert respuesta.status_code == 307
-    assert "catalogo/plantilla/impar.png" in respuesta.headers["location"]
+    assert respuesta.status_code == 200
+    assert respuesta.content == b"\x89PNG banda impar"
 
 
 def test_la_banda_que_no_esta_cargada_da_404_y_no_rompe_la_pagina(
@@ -117,17 +126,31 @@ def test_lista_las_paginas_de_arte_activas(
     assert [(p["pagina"], p["tipo"]) for p in paginas] == [(1, "portada")]
 
 
-def test_la_vista_previa_de_la_pagina_va_por_url_firmada(
+def test_la_vista_previa_de_la_pagina_la_sirve_la_api(
     cliente_api: TestClient, almacen: AlmacenDeMentira, plantilla: dict[str, Any]
 ) -> None:
-    """El bucket no se abre al público por comodidad, ni siquiera para la portada."""
+    """El bucket no se abre al público, ni siquiera para la portada: el contenido sale
+    por la API. Una URL firmada apuntaría al endpoint interno de MinIO, que desde la LAN
+    o la VPN no resuelve."""
     respuesta = cliente_api.get(
         f"{PREFIJO}/catalogo/paginas/{plantilla['portada_id']}/imagen", follow_redirects=False
     )
 
-    assert respuesta.status_code == 307
-    assert respuesta.headers["location"].startswith("https://almacen.ejemplo/")
-    assert "firma=" in respuesta.headers["location"]
+    assert respuesta.status_code == 200
+    assert respuesta.content == b"\x89PNG portada"
+    assert respuesta.headers["content-type"] == "image/png"
+
+
+def test_la_pagina_sin_objeto_en_el_bucket_da_404(
+    cliente_api: TestClient, almacen: AlmacenDeMentira, plantilla: dict[str, Any]
+) -> None:
+    """La fila puede existir sin el objeto si la carga quedó a medias. Mejor un 404 que
+    un 500 en medio del catálogo."""
+    almacen.contenido.pop("catalogo/paginas/p1.png")
+
+    respuesta = cliente_api.get(f"{PREFIJO}/catalogo/paginas/{plantilla['portada_id']}/imagen")
+
+    assert respuesta.status_code == 404
 
 
 def test_el_catalogo_es_publico_sin_ingresar(
@@ -142,8 +165,8 @@ def test_el_logo_de_marca_se_sirve_desde_el_producto(
 ) -> None:
     respuesta = cliente_api.get(f"{PREFIJO}/productos/DVU-CODO/marca", follow_redirects=False)
 
-    assert respuesta.status_code == 307
-    assert "catalogo/marcas/vinilit.png" in respuesta.headers["location"]
+    assert respuesta.status_code == 200
+    assert respuesta.content == b"\x89PNG logo vinilit"
 
 
 def test_el_producto_sin_logo_no_finge_tener_uno(
