@@ -134,6 +134,12 @@ make cartola-demo  # cartola de prueba para ensayar la conciliación sin agregad
   errores de parseo. No los inventes.
 - Chile: RUT con dígito verificador. Validar siempre con módulo 11, guardar normalizado
   sin puntos y con guion (`76123456-7`).
+- **Los tests borran el esquema entero** (`Base.metadata.drop_all`, al empezar y al
+  terminar). `conftest.py` le pega el sufijo `_test` a la base de `DVU_DATABASE_URL`
+  justamente por eso: sin ese sufijo, `make test-all` con el stack levantado se lleva
+  puesto el catálogo cargado sin preguntar y sin aviso —el drop es lo último que corre,
+  después de que pytest ya imprimió que todo pasó—. **Pasó.** No apuntes los tests a la
+  base del stack ni saques el sufijo. Para recuperar: `~/backups/migracion-prod/dvu.dump`.
 - El **signo `$` es una palabra suelta** que cae justo sobre la frontera
   `medida`/`precio` (centro 536.9–547.9 pt, frontera en 545.0). Clasificado por posición
   se pegaba a la medida en el 76% de los casos: 231 filas quedaron con `medida = "$"`.
