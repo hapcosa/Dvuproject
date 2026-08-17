@@ -152,6 +152,32 @@ const DVU = (() => {
     elemento.hidden = false;
   }
 
+  /** Deja pasar `ms` de calma antes de ejecutar; cada llamada nueva reinicia la espera.
+   *
+   *  Es lo que hace que buscar mientras se escribe no sea una petición por tecla, y que
+   *  apretar «+» cinco veces seguidas guarde una vez y no cinco. Devuelve una función
+   *  con `.ahora(...)` para cuando no se puede esperar —al enviar, por ejemplo—. */
+  function aplazar(fn, ms) {
+    let reloj = null;
+    const aplazada = (...args) => {
+      clearTimeout(reloj);
+      reloj = setTimeout(() => fn(...args), ms);
+    };
+    aplazada.ahora = (...args) => {
+      clearTimeout(reloj);
+      return fn(...args);
+    };
+    aplazada.cancelar = () => clearTimeout(reloj);
+    return aplazada;
+  }
+
+  /** Abre WhatsApp con el texto listo para elegir a quién mandárselo.
+   *
+   *  El pedido hoy viaja por WhatsApp y va a seguir viajando un tiempo: el vendedor le
+   *  manda el resumen al ferretero para que confirme. Sin esto, copiaría a mano. */
+  const porWhatsapp = (texto) =>
+    window.open(`https://wa.me/?text=${encodeURIComponent(texto)}`, "_blank", "noopener");
+
   /** Muestra el bloque que corresponde al rol y deja la sesión visible arriba. */
   async function proteger({ rol, alIngresar }) {
     const login = document.getElementById("login");
@@ -197,6 +223,6 @@ const DVU = (() => {
 
   return {
     pedir, ingresar, yo, salir, descargar, descargarGrande,
-    pesos, escapar, oVacio, avisar, proteger,
+    pesos, escapar, oVacio, avisar, aplazar, porWhatsapp, proteger,
   };
 })();

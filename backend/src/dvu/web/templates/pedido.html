@@ -6,348 +6,839 @@
 {% endwith %}
 
 <div id="app" hidden>
-  <section class="tarjeta">
-    <h2>Armar pedido</h2>
-    <p class="pista">
-      Lo mismo que hoy se manda por WhatsApp, pero con los precios y los múltiplos del
-      catálogo puestos por el sistema. Las cantidades van <strong>en envases</strong>:
-      DVU vende por caja, no por unidad suelta.
+  <div id="mensaje" hidden></div>
+
+  <!-- Las listas guardadas. Quien no las tiene (rol `cliente`) igual arma la suya. -->
+  <section class="tarjeta" id="panel-listas">
+    <h2>Mis listas</h2>
+    <p class="pista" id="pista-listas">
+      Una lista por ferretería. Quedan guardadas en el servidor, así que puedes cerrar
+      esto, atender otra cosa y volver: la lista sigue donde la dejaste, y si andas con
+      el celular y el computador, en los dos lados es la misma.
     </p>
 
-    <div class="rejilla">
-      <div class="campo">
-        <label for="cliente">Cliente</label>
-        <select id="cliente"><option value="">Cargando tu cartera…</option></select>
+    <div id="listas" hidden>Cargando…</div>
+
+    <form class="filtros" id="form-nueva">
+      <div class="campo" style="flex:1">
+        <label for="cliente-nuevo">Empezar una lista para…</label>
+        <input id="cliente-nuevo" list="clientes" autocomplete="off"
+               placeholder="Escribe la ferretería o el RUT">
+        <datalist id="clientes"></datalist>
       </div>
-      <div class="campo">
-        <label for="observaciones">Observaciones <span class="vacio">(opcional)</span></label>
-        <input id="observaciones" placeholder="Entregar en bodega, después de las 15:00">
-      </div>
-    </div>
+      <div class="acciones"><button type="submit">+ Nueva lista</button></div>
+    </form>
   </section>
 
-  <section class="tarjeta">
-    <h3>Buscar en el catálogo</h3>
-    <form class="filtros" id="buscador" style="margin-bottom:12px">
+  <!-- El armado en sí. Aparece con una lista abierta. -->
+  <section class="tarjeta" id="constructor" hidden>
+    <header class="cabecera-lista">
+      <div>
+        <h2 id="titulo-lista"></h2>
+        <p class="pista" id="sub-lista"></p>
+      </div>
+      <div class="acciones">
+        <span class="guardado" id="guardado"></span>
+        <button type="button" class="plano" id="cerrar">Cerrar</button>
+      </div>
+    </header>
+
+    <form class="filtros" id="buscador">
       <div class="campo" style="flex:1">
-        <label for="q">Descripción o código de proveedor</label>
-        <input type="search" id="q" placeholder="codo media, cerradura, PR/49573…">
+        <label for="q">Buscar en el catálogo</label>
+        <input type="search" id="q" autocomplete="off"
+               placeholder="codo media, cerradura, PR/49573…">
       </div>
       <div class="campo">
         <label for="categoria">Categoría</label>
         <select id="categoria"><option value="">Todas</option></select>
       </div>
-      <div class="acciones"><button type="submit">Buscar</button></div>
     </form>
+    <p class="pista">
+      Se busca mientras escribes. Con <kbd>Enter</kbd> se agrega cuando queda un solo
+      resultado, que es lo que pasa al tipear un código.
+    </p>
 
     <div class="desplazable">
       <table class="datos">
         <thead>
           <tr>
-            <th>Código</th><th>Descripción</th><th>Categoría</th>
-            <th class="numero">Precio</th><th>Venta mínima</th>
+            <th class="col-imagen"></th><th>Producto</th>
+            <th class="numero">Precio</th><th>Se vende de a</th>
             <th class="numero">Envases</th><th></th>
           </tr>
         </thead>
         <tbody id="resultados">
-          <tr><td colspan="7">Busca un producto para empezar.</td></tr>
+          <tr><td colspan="6">Escribe para buscar, o filtra por categoría.</td></tr>
         </tbody>
       </table>
     </div>
+    <div id="mas"></div>
   </section>
 
-  <section class="tarjeta">
-    <h3>Pedido</h3>
-    <div id="aviso" hidden></div>
+  <section class="tarjeta" id="tarjeta-lista" hidden>
+    <h3>La lista <span class="cuenta" id="cuenta-lineas">0</span></h3>
+    <div id="aviso-lista" hidden></div>
 
     <div class="desplazable">
       <table class="datos">
         <thead>
           <tr>
-            <th>Código</th><th>Descripción</th>
-            <th class="numero">Envases</th><th class="numero">Unidades</th>
+            <th>Producto</th><th class="numero">Envases</th><th class="numero">Unidades</th>
             <th class="numero">Precio unit.</th><th class="numero">Total línea</th><th></th>
           </tr>
         </thead>
-        <tbody id="carrito"><tr><td colspan="7">El pedido está vacío.</td></tr></tbody>
-        <tfoot>
-          <tr>
-            <th colspan="5" class="numero">Neto (suma de las líneas)</th>
-            <th class="numero" id="neto">$ 0</th>
-            <th></th>
-          </tr>
-        </tfoot>
+        <tbody id="lineas"><tr><td colspan="6">La lista está vacía.</td></tr></tbody>
+        <tfoot id="totales"></tfoot>
       </table>
     </div>
 
-    <p class="pista" style="margin:10px 0 0">
-      El IVA y el total los calcula el servidor al confirmar: la regla del impuesto vive
-      en un solo lugar y esta página no la repite.
-    </p>
+    <div class="campo" style="margin-top:14px">
+      <label for="observaciones">Observaciones <span class="vacio">(opcional)</span></label>
+      <input id="observaciones" placeholder="Entregar en bodega, después de las 15:00">
+    </div>
 
-    <div style="display:flex; gap:8px; margin-top:12px">
+    <div class="acciones">
       <button type="button" id="enviar">Enviar pedido</button>
-      <button type="button" class="plano" id="vaciar">Vaciar</button>
+      <button type="button" class="plano" id="descartar">Descartar la lista</button>
     </div>
   </section>
 
   <section class="tarjeta">
     <h3>Mis últimos pedidos</h3>
+    <p class="pista">
+      «Repetir» arma una lista nueva con lo mismo del pedido anterior. La ferretería
+      pide casi siempre lo mismo, y volver a buscar treinta productos uno por uno es
+      la mitad de la visita.
+    </p>
     <div class="desplazable">
       <table class="datos">
         <thead>
           <tr>
             <th>Número</th><th>Cliente</th><th class="numero">Líneas</th>
-            <th class="numero">Total</th><th>Estado</th><th>Fecha</th>
+            <th class="numero">Total</th><th>Estado</th><th>Fecha</th><th></th>
           </tr>
         </thead>
-        <tbody id="mios"><tr><td colspan="6">Cargando…</td></tr></tbody>
+        <tbody id="mios"><tr><td colspan="7">Cargando…</td></tr></tbody>
       </table>
     </div>
   </section>
 </div>
+
+<!-- La barra de abajo: en el celular la lista queda fuera de pantalla mientras se
+     buscan productos, y sin esto el vendedor no ve lo que lleva. -->
+<div class="barra-pedido" id="barra" hidden>
+  <div class="resumen">
+    <strong id="barra-total">$ 0</strong>
+    <span id="barra-detalle" class="pista"></span>
+  </div>
+  <div class="acciones">
+    <button type="button" class="plano" id="ir-lista">Ver la lista</button>
+    <button type="button" id="enviar-barra">Enviar</button>
+  </div>
+</div>
+
+<dialog id="confirmar" class="confirmacion">
+  <h3>¿Enviamos el pedido?</h3>
+  <div id="confirmar-cuerpo"></div>
+  <div class="acciones">
+    <button type="button" id="confirmar-si">Sí, enviar</button>
+    <button type="button" class="plano" id="confirmar-no">Volver</button>
+  </div>
+</dialog>
 {% endblock %}
 
 {% block script %}
 <script>
-const CLAVE_CARRITO = "dvu_carrito";
-const aviso = document.getElementById("aviso");
-
-/* El carrito vive en sessionStorage por la misma razón que el token: en un equipo
- * compartido de bodega, cerrar la pestaña tiene que dejar la máquina limpia. Sobrevive
- * a un F5, que es el accidente real.
+/* Armar el pedido es tomar dictado: el ferretero canta treinta productos seguidos y
+ * cada roce se multiplica por treinta. De ahí las decisiones de esta página:
  *
- * `client_uuid` es la clave de idempotencia y **no se regenera en cada intento**: si el
- * envío se corta a mitad de camino y el vendedor vuelve a apretar, el backend reconoce
- * el mismo uuid y devuelve el pedido que ya creó en vez de duplicarlo. Sólo se renueva
- * cuando un envío terminó bien. Es el mismo contrato que usará la app Flutter offline.
+ * - Se busca mientras se escribe y se agrega con Enter. Un botón «Buscar» son dos
+ *   toques más por producto.
+ * - La lista vive en el servidor (`/pedidos/borradores`), no en el navegador: la
+ *   mañana del vendedor son cinco ferreterías, y una lista a medias que se pierde
+ *   porque se cerró la pestaña es trabajo que hay que rehacer con el cliente al lado.
+ * - Los totales los calcula el servidor (`/pedidos/cotizar`). La regla del IVA vive
+ *   en el dominio y esta página no la repite; de paso el precio que se muestra es el
+ *   de hoy, no el de cuando se empezó la lista.
  */
-function cargarCarrito() {
-  try {
-    const guardado = JSON.parse(sessionStorage.getItem(CLAVE_CARRITO));
-    if (guardado?.lineas) return guardado;
-  } catch { /* basura en sessionStorage: se empieza de nuevo */ }
-  return { client_uuid: crypto.randomUUID(), lineas: [] };
+
+const API = document.querySelector('meta[name="dvu-api"]').content;
+const mensaje = document.getElementById("mensaje");
+const avisoLista = document.getElementById("aviso-lista");
+
+let usuario = null;
+/** La lista abierta: `{client_uuid, cliente_rut, cliente_razon_social, observaciones,
+ *  lineas: [{sku, descripcion, cantidad, multiplo_venta}]}`, o `null`. */
+let lista = null;
+/** Lo último que respondió `/pedidos/cotizar`, indexado por SKU para pintar la lista. */
+let cotizado = new Map();
+let totales = { neto_clp: 0, iva_clp: 0, total_clp: 0, con_problema: 0 };
+/** Los clientes de la cartera, por RUT, para resolver lo que se escribe en el buscador. */
+const cartera = new Map();
+
+const envases = (linea) => Math.floor(linea.cantidad / (linea.multiplo_venta || 1));
+const $ = (id) => document.getElementById(id);
+
+/* --- dónde se guarda la lista ---------------------------------------------
+ *
+ * El vendedor las guarda en el servidor. Un usuario con rol `cliente` no tiene a quién
+ * atribuírselas —no hay vínculo usuario↔cliente— así que arma una sola en el navegador
+ * y la manda con `POST /pedidos`, que es lo que esta página hacía antes.
+ */
+
+const enServidor = {
+  guardaVarias: true,
+  listar: () => DVU.pedir("/pedidos/borradores"),
+  crear: (cliente, lineas = []) =>
+    DVU.pedir("/pedidos/borradores", {
+      method: "POST",
+      body: {
+        client_uuid: crypto.randomUUID(),
+        cliente_rut: cliente.rut,
+        lineas: lineas.map((l) => ({ sku: l.sku, cantidad: l.cantidad })),
+      },
+    }),
+  guardar: (l) =>
+    DVU.pedir(`/pedidos/borradores/${l.client_uuid}`, {
+      method: "PUT",
+      body: {
+        cliente_rut: l.cliente_rut,
+        observaciones: l.observaciones || null,
+        lineas: l.lineas.map((x) => ({ sku: x.sku, cantidad: x.cantidad })),
+      },
+    }),
+  descartar: (l) => DVU.pedir(`/pedidos/borradores/${l.client_uuid}`, { method: "DELETE" }),
+  enviar: (l) => DVU.pedir(`/pedidos/borradores/${l.client_uuid}/enviar`, { method: "POST" }),
+};
+
+const CLAVE_LOCAL = "dvu_lista";
+
+const enNavegador = {
+  guardaVarias: false,
+  listar: () => {
+    const guardada = JSON.parse(sessionStorage.getItem(CLAVE_LOCAL) || "null");
+    return Promise.resolve(guardada ? [guardada] : []);
+  },
+  crear: (cliente, lineas = []) =>
+    Promise.resolve({
+      client_uuid: crypto.randomUUID(),
+      cliente_rut: cliente.rut,
+      cliente_razon_social: cliente.razon_social,
+      observaciones: null,
+      lineas,
+    }),
+  guardar: (l) => {
+    sessionStorage.setItem(CLAVE_LOCAL, JSON.stringify(l));
+    return Promise.resolve(l);
+  },
+  descartar: () => {
+    sessionStorage.removeItem(CLAVE_LOCAL);
+    return Promise.resolve(null);
+  },
+  // Sin borrador en el servidor, se crea el pedido derecho. El `client_uuid` es el
+  // mismo con que se guardó: reintentar tras perder la señal no duplica.
+  enviar: (l) =>
+    DVU.pedir("/pedidos", {
+      method: "POST",
+      body: {
+        client_uuid: l.client_uuid,
+        cliente_rut: l.cliente_rut,
+        observaciones: l.observaciones || null,
+        creado_en_dispositivo: new Date().toISOString(),
+        lineas: l.lineas.map((x) => ({ sku: x.sku, cantidad: x.cantidad })),
+      },
+    }),
+};
+
+let almacen = enNavegador;
+
+/** Normaliza lo que devuelve la API al mínimo que esta página necesita. */
+function aLista(borrador) {
+  return {
+    client_uuid: borrador.client_uuid,
+    cliente_rut: borrador.cliente_rut,
+    cliente_razon_social: borrador.cliente_razon_social || borrador.cliente_rut,
+    observaciones: borrador.observaciones || "",
+    lineas: (borrador.lineas || []).map((l) => ({
+      sku: l.sku,
+      descripcion: l.descripcion,
+      cantidad: l.cantidad,
+      multiplo_venta: l.multiplo_venta,
+    })),
+  };
 }
 
-let carrito = cargarCarrito();
-const guardar = () => sessionStorage.setItem(CLAVE_CARRITO, JSON.stringify(carrito));
+/* --- guardar y cotizar ---------------------------------------------------- */
 
-/* --- catálogo ----------------------------------------------------------- */
+const marcarGuardado = (texto, clase = "") => {
+  $("guardado").textContent = texto;
+  $("guardado").className = `guardado ${clase}`;
+};
 
-const ventaMinima = (p) =>
-  `${p.multiplo_venta} × ${DVU.escapar(p.envase || p.unidad_venta || "UNID")}`;
+const guardarPronto = DVU.aplazar(async () => {
+  if (!lista) return;
+  marcarGuardado("Guardando…");
+  try {
+    await almacen.guardar(lista);
+    marcarGuardado("Guardado", "ok");
+    if (almacen.guardaVarias) cargarListas();
+  } catch (e) {
+    // La lista completa viaja en cada guardado, así que el próximo cambio reintenta
+    // solo y sin arrastrar lo que se perdió. Mientras tanto se dice, no se oculta.
+    marcarGuardado("Sin guardar", "error");
+    DVU.avisar(mensaje, `No se pudo guardar la lista: ${e.message}`, "error");
+  }
+}, 700);
 
-async function buscar() {
-  const cuerpo = document.getElementById("resultados");
-  const parametros = new URLSearchParams({ limite: 25 });
-  const q = document.getElementById("q").value.trim();
-  const categoria = document.getElementById("categoria").value;
+const cotizarPronto = DVU.aplazar(async () => {
+  if (!lista) return;
+  if (!lista.lineas.length) {
+    cotizado = new Map();
+    totales = { neto_clp: 0, iva_clp: 0, total_clp: 0, con_problema: 0 };
+    return pintarTotales();
+  }
+  try {
+    const respuesta = await DVU.pedir("/pedidos/cotizar", {
+      method: "POST",
+      body: { lineas: lista.lineas.map((l) => ({ sku: l.sku, cantidad: l.cantidad })) },
+    });
+    cotizado = new Map(respuesta.lineas.map((l) => [l.sku, l]));
+    totales = respuesta;
+    dibujarLineas();
+    pintarTotales();
+  } catch (e) {
+    DVU.avisar(mensaje, e.message, "error");
+  }
+}, 300);
+
+/** Un cambio en la lista: se dibuja al tiro y se guarda y cotiza cuando pare la mano. */
+function cambio() {
+  dibujarLineas();
+  guardarPronto();
+  cotizarPronto();
+}
+
+/* --- la lista abierta ----------------------------------------------------- */
+
+function abrir(borrador) {
+  lista = aLista(borrador);
+  cotizado = new Map();
+  $("constructor").hidden = false;
+  $("tarjeta-lista").hidden = false;
+  $("titulo-lista").textContent = lista.cliente_razon_social;
+  $("sub-lista").textContent = `RUT ${lista.cliente_rut}`;
+  $("observaciones").value = lista.observaciones;
+  marcarGuardado("Guardado", "ok");
+  dibujarLineas();
+  cotizarPronto();
+  buscar();
+  $("q").focus();
+}
+
+function cerrar() {
+  lista = null;
+  cotizado = new Map();
+  $("constructor").hidden = true;
+  $("tarjeta-lista").hidden = true;
+  $("barra").hidden = true;
+  avisoLista.hidden = true;
+  cargarListas();
+}
+
+function agregar(producto, cuantos) {
+  const existente = lista.lineas.find((l) => l.sku === producto.sku);
+  const nuevos = cuantos * producto.multiplo_venta;
+  if (existente) existente.cantidad += nuevos;
+  else
+    lista.lineas.push({
+      sku: producto.sku,
+      descripcion: producto.descripcion,
+      cantidad: nuevos,
+      multiplo_venta: producto.multiplo_venta,
+    });
+
+  const total = (existente || lista.lineas.at(-1)).cantidad;
+  // Sumar en silencio es cómo se agrega dos veces el mismo codo sin notarlo.
+  DVU.avisar(
+    mensaje,
+    `+${cuantos} · ${producto.descripcion} — quedan ${total / producto.multiplo_venta} en la lista.`,
+    "ok"
+  );
+  cambio();
+  dibujarResultados();
+}
+
+function mover(sku, paso) {
+  const linea = lista.lineas.find((l) => l.sku === sku);
+  if (!linea) return;
+  const cuantos = envases(linea) + paso;
+  if (cuantos <= 0) return quitar(sku);
+  linea.cantidad = cuantos * linea.multiplo_venta;
+  cambio();
+  dibujarResultados();
+}
+
+function quitar(sku) {
+  lista.lineas = lista.lineas.filter((l) => l.sku !== sku);
+  cambio();
+  dibujarResultados();
+}
+
+function dibujarLineas() {
+  const cuerpo = $("lineas");
+  $("cuenta-lineas").textContent = lista ? lista.lineas.length : 0;
+  if (!lista || !lista.lineas.length) {
+    cuerpo.innerHTML = '<tr><td colspan="6">La lista está vacía.</td></tr>';
+    return pintarTotales();
+  }
+
+  cuerpo.innerHTML = lista.lineas
+    .map((l) => {
+      const c = cotizado.get(l.sku);
+      const problema = c?.problema;
+      return `
+      <tr class="${problema ? "linea-mala" : ""}" data-sku="${DVU.escapar(l.sku)}">
+        <td>
+          ${DVU.escapar(l.descripcion)}
+          <br><small>se vende de a ${l.multiplo_venta}</small>
+          ${problema ? `<br><small class="problema">${DVU.escapar(problema)}</small>` : ""}
+          ${
+            c?.cantidad_sugerida
+              ? `<button type="button" class="plano arreglar" data-sku="${DVU.escapar(l.sku)}"
+                   data-cantidad="${c.cantidad_sugerida}">Dejar ${c.cantidad_sugerida}</button>`
+              : ""
+          }
+        </td>
+        <td class="numero contador">
+          <button type="button" class="plano menos" data-sku="${DVU.escapar(l.sku)}">−</button>
+          <b>${envases(l)}</b>
+          <button type="button" class="plano mas" data-sku="${DVU.escapar(l.sku)}">+</button>
+        </td>
+        <td class="numero">${l.cantidad.toLocaleString("es-CL")}</td>
+        <td class="numero">${c ? DVU.pesos(c.precio_unitario_clp) : ""}</td>
+        <td class="numero">${c && !problema ? DVU.pesos(c.total_linea_clp) : "—"}</td>
+        <td><button type="button" class="plano quitar" data-sku="${DVU.escapar(l.sku)}">✕</button></td>
+      </tr>`;
+    })
+    .join("");
+  pintarTotales();
+}
+
+/** El IVA y el total salen del servidor. Esta página no repite la regla del impuesto. */
+function pintarTotales() {
+  const hay = lista && lista.lineas.length;
+  $("totales").innerHTML = hay
+    ? `<tr><th colspan="4" class="numero">Neto</th>
+           <th class="numero">${DVU.pesos(totales.neto_clp)}</th><th></th></tr>
+       <tr><th colspan="4" class="numero">IVA</th>
+           <th class="numero">${DVU.pesos(totales.iva_clp)}</th><th></th></tr>
+       <tr class="total"><th colspan="4" class="numero">Total</th>
+           <th class="numero">${DVU.pesos(totales.total_clp)}</th><th></th></tr>`
+    : "";
+
+  $("barra").hidden = !hay;
+  $("barra-total").textContent = DVU.pesos(totales.total_clp);
+  $("barra-detalle").textContent = hay
+    ? `${lista.lineas.length} línea${lista.lineas.length === 1 ? "" : "s"} · IVA incluido`
+    : "";
+
+  if (totales.con_problema) {
+    DVU.avisar(
+      avisoLista,
+      `${totales.con_problema} línea${totales.con_problema === 1 ? "" : "s"} no se ${
+        totales.con_problema === 1 ? "puede" : "pueden"
+      } pedir así y no suman al total. Arréglalas antes de enviar.`,
+      "error"
+    );
+  } else {
+    avisoLista.hidden = true;
+  }
+}
+
+$("lineas").onclick = (evento) => {
+  const { sku, cantidad } = evento.target.dataset;
+  if (!sku) return;
+  if (evento.target.classList.contains("menos")) return mover(sku, -1);
+  if (evento.target.classList.contains("mas")) return mover(sku, 1);
+  if (evento.target.classList.contains("quitar")) return quitar(sku);
+  if (evento.target.classList.contains("arreglar")) {
+    lista.lineas.find((l) => l.sku === sku).cantidad = Number(cantidad);
+    cambio();
+  }
+};
+
+$("observaciones").oninput = () => {
+  lista.observaciones = $("observaciones").value;
+  guardarPronto();
+};
+
+/* --- buscar en el catálogo ------------------------------------------------ */
+
+let pagina = { items: [], total: 0 };
+let desde = 0;
+const POR_PAGINA = 25;
+
+const enLista = (sku) => lista?.lineas.find((l) => l.sku === sku);
+
+async function buscar(acumular = false) {
+  const cuerpo = $("resultados");
+  const parametros = new URLSearchParams({ limite: POR_PAGINA, offset: acumular ? desde : 0 });
+  const q = $("q").value.trim();
+  const categoria = $("categoria").value;
   if (q) parametros.set("q", q);
   if (categoria) parametros.set("categoria", categoria);
 
-  cuerpo.innerHTML = '<tr><td colspan="7">Buscando…</td></tr>';
-  try {
-    const pagina = await DVU.pedir(`/productos?${parametros}`);
-    cuerpo.innerHTML = pagina.items.length
-      ? pagina.items.map((p) => `
-        <tr data-sku="${DVU.escapar(p.sku)}">
-          <td><code>${DVU.escapar(p.codigos_proveedor[0] || p.sku)}</code></td>
-          <td>${DVU.escapar(p.descripcion)}</td>
-          <td>${DVU.oVacio(p.categoria_nombre)}</td>
-          <td class="numero">${DVU.pesos(p.precio_lista_clp)}</td>
-          <td>${ventaMinima(p)}</td>
-          <td class="numero"><input type="number" min="1" value="1" style="width:70px"></td>
-          <td><button type="button" class="plano agregar">Agregar</button></td>
-        </tr>`).join("")
-      : '<tr><td colspan="7">Sin resultados.</td></tr>';
-
-    // Los datos del producto se guardan acá para no volver a pedirlos al agregar.
-    cuerpo.querySelectorAll("tr[data-sku]").forEach((fila, i) => { fila._producto = pagina.items[i]; });
-  } catch (e) {
-    cuerpo.innerHTML = `<tr><td colspan="7">${DVU.escapar(e.message)}</td></tr>`;
+  if (!acumular) {
+    desde = 0;
+    cuerpo.innerHTML = '<tr><td colspan="6">Buscando…</td></tr>';
   }
-}
-
-document.getElementById("resultados").onclick = (evento) => {
-  if (!evento.target.classList.contains("agregar")) return;
-  const fila = evento.target.closest("tr");
-  const envases = Math.max(1, parseInt(fila.querySelector("input").value, 10) || 1);
-  agregar(fila._producto, envases);
-};
-
-function agregar(producto, envases) {
-  const existente = carrito.lineas.find((l) => l.sku === producto.sku);
-  if (existente) existente.envases += envases;
-  else carrito.lineas.push({
-    sku: producto.sku,
-    codigo: producto.codigos_proveedor[0] || producto.sku,
-    descripcion: producto.descripcion,
-    multiplo_venta: producto.multiplo_venta,
-    precio_lista_clp: producto.precio_lista_clp,
-    envases,
-  });
-  guardar();
-  dibujarCarrito();
-}
-
-/* --- carrito ------------------------------------------------------------ */
-
-/* La cantidad que viaja a la API es siempre `envases × multiplo_venta`, así que por
- * construcción es múltiplo de la venta mínima. El backend lo valida igual —es su
- * regla, no la de esta página— pero el vendedor no puede equivocarse desde acá. */
-const unidades = (linea) => linea.envases * linea.multiplo_venta;
-const totalLinea = (linea) => unidades(linea) * linea.precio_lista_clp;
-
-function dibujarCarrito() {
-  const cuerpo = document.getElementById("carrito");
-  cuerpo.innerHTML = carrito.lineas.length
-    ? carrito.lineas.map((l, i) => `
-      <tr>
-        <td><code>${DVU.escapar(l.codigo)}</code></td>
-        <td>${DVU.escapar(l.descripcion)}<br><small>venta mínima: ${l.multiplo_venta}</small></td>
-        <td class="numero">
-          <input type="number" min="1" value="${l.envases}" data-i="${i}" style="width:70px">
-        </td>
-        <td class="numero">${unidades(l).toLocaleString("es-CL")}</td>
-        <td class="numero">${DVU.pesos(l.precio_lista_clp)}</td>
-        <td class="numero">${DVU.pesos(totalLinea(l))}</td>
-        <td><button type="button" class="plano quitar" data-i="${i}">Quitar</button></td>
-      </tr>`).join("")
-    : '<tr><td colspan="7">El pedido está vacío.</td></tr>';
-
-  document.getElementById("neto").textContent =
-    DVU.pesos(carrito.lineas.reduce((suma, l) => suma + totalLinea(l), 0));
-}
-
-document.getElementById("carrito").onclick = (evento) => {
-  if (!evento.target.classList.contains("quitar")) return;
-  carrito.lineas.splice(Number(evento.target.dataset.i), 1);
-  guardar();
-  dibujarCarrito();
-};
-
-document.getElementById("carrito").onchange = (evento) => {
-  const i = evento.target.dataset.i;
-  if (i === undefined) return;
-  carrito.lineas[Number(i)].envases = Math.max(1, parseInt(evento.target.value, 10) || 1);
-  guardar();
-  dibujarCarrito();
-};
-
-document.getElementById("vaciar").onclick = () => {
-  // Vaciar empieza un pedido nuevo, así que también estrena `client_uuid`.
-  carrito = { client_uuid: crypto.randomUUID(), lineas: [] };
-  guardar();
-  dibujarCarrito();
-  aviso.hidden = true;
-};
-
-/* --- enviar ------------------------------------------------------------- */
-
-document.getElementById("enviar").onclick = async (evento) => {
-  const boton = evento.target;
-  const rut = document.getElementById("cliente").value;
-
-  if (!rut) return DVU.avisar(aviso, "Elige el cliente antes de enviar.", "error");
-  if (!carrito.lineas.length) return DVU.avisar(aviso, "El pedido no tiene líneas.", "error");
-
-  boton.disabled = true;
   try {
-    const pedido = await DVU.pedir("/pedidos", {
-      method: "POST",
-      body: {
-        client_uuid: carrito.client_uuid,
-        cliente_rut: rut,
-        observaciones: document.getElementById("observaciones").value.trim() || null,
-        // La hora del dispositivo, que es cuando el vendedor lo tomó de verdad. Con la
-        // app offline puede ser muy anterior a la sincronización.
-        creado_en_dispositivo: new Date().toISOString(),
-        lineas: carrito.lineas.map((l) => ({ sku: l.sku, cantidad: unidades(l) })),
-      },
-    });
-
-    DVU.avisar(
-      aviso,
-      `Pedido ${pedido.numero} enviado. Neto ${DVU.pesos(pedido.neto_clp)} · ` +
-      `IVA ${DVU.pesos(pedido.iva_clp)} · Total ${DVU.pesos(pedido.total_clp)}.`,
-      "ok"
-    );
-    carrito = { client_uuid: crypto.randomUUID(), lineas: [] };
-    guardar();
-    dibujarCarrito();
-    document.getElementById("observaciones").value = "";
-    cargarMios();
-  } catch (e) {
-    // El 422 de múltiplos llega con TODAS las líneas malas de una vez, no con la
-    // primera: reenviar cuesta señal. Se muestran todas.
-    DVU.avisar(aviso, e.message, "error");
-  } finally {
-    boton.disabled = false;
-  }
-};
-
-/* --- carga inicial ------------------------------------------------------ */
-
-async function cargarClientes() {
-  const select = document.getElementById("cliente");
-  try {
-    const pagina = await DVU.pedir("/clientes?limite=200");
-    select.innerHTML = pagina.items.length
-      ? '<option value="">Elige el cliente…</option>' +
-        pagina.items.map((c) =>
-          `<option value="${DVU.escapar(c.rut)}">${DVU.escapar(c.razon_social)} — ${DVU.escapar(c.rut)}</option>`
-        ).join("")
-      : '<option value="">Tu cartera está vacía</option>';
-  } catch (e) {
-    select.innerHTML = `<option value="">${DVU.escapar(e.message)}</option>`;
-  }
-}
-
-async function cargarCategorias() {
-  const select = document.getElementById("categoria");
-  try {
-    const categorias = await DVU.pedir("/categorias");
-    select.innerHTML = '<option value="">Todas</option>' +
-      categorias.map((c) =>
-        `<option value="${DVU.escapar(c.slug)}">${DVU.escapar(c.nombre)} (${c.productos})</option>`
-      ).join("");
-  } catch { /* sin categorías se busca por texto, que es como se busca hoy */ }
-}
-
-async function cargarMios() {
-  const cuerpo = document.getElementById("mios");
-  try {
-    const pagina = await DVU.pedir("/pedidos?limite=10");
-    cuerpo.innerHTML = pagina.items.length
-      ? pagina.items.map((p) => `
-        <tr>
-          <td><code>${DVU.escapar(p.numero)}</code></td>
-          <td>${DVU.escapar(p.cliente_rut)}</td>
-          <td class="numero">${p.lineas.length}</td>
-          <td class="numero">${DVU.pesos(p.total_clp)}</td>
-          <td>${DVU.escapar(p.estado)}</td>
-          <td>${p.sincronizado_en ? new Date(p.sincronizado_en).toLocaleString("es-CL") : ""}</td>
-        </tr>`).join("")
-      : '<tr><td colspan="6">Todavía no enviaste ninguno.</td></tr>';
+    const respuesta = await DVU.pedir(`/productos?${parametros}`);
+    pagina = acumular
+      ? { items: pagina.items.concat(respuesta.items), total: respuesta.total }
+      : respuesta;
+    desde = pagina.items.length;
+    dibujarResultados();
   } catch (e) {
     cuerpo.innerHTML = `<tr><td colspan="6">${DVU.escapar(e.message)}</td></tr>`;
   }
 }
 
-document.getElementById("buscador").onsubmit = (evento) => {
-  evento.preventDefault();
-  buscar();
+function dibujarResultados() {
+  const cuerpo = $("resultados");
+  if (!pagina.items.length) {
+    cuerpo.innerHTML = '<tr><td colspan="6">Sin resultados. Prueba con otra palabra.</td></tr>';
+    $("mas").innerHTML = "";
+    return;
+  }
+
+  cuerpo.innerHTML = pagina.items
+    .map((p) => {
+      const puesto = enLista(p.sku);
+      return `
+      <tr data-sku="${DVU.escapar(p.sku)}">
+        <td class="col-imagen">${
+          p.imagen_key
+            ? `<img class="miniatura" loading="lazy" alt=""
+                    src="${API}/productos/${encodeURIComponent(p.sku)}/imagen">`
+            : '<div class="sin-imagen">sin foto</div>'
+        }</td>
+        <td>
+          ${DVU.escapar(p.descripcion)}
+          <br><small><code>${DVU.escapar(p.codigos_proveedor[0] || p.sku)}</code>
+          ${p.medida ? " · " + DVU.escapar(p.medida) : ""}</small>
+          ${puesto ? `<br><span class="pastilla puesta">${envases(puesto)} en la lista</span>` : ""}
+        </td>
+        <td class="numero">${DVU.pesos(p.precio_lista_clp)}</td>
+        <td>${p.multiplo_venta} × ${DVU.escapar(p.envase || p.unidad_venta || "UNID")}</td>
+        <td class="numero">
+          <input type="number" min="1" value="1" class="cuantos" aria-label="Envases">
+        </td>
+        <td><button type="button" class="agregar">Agregar</button></td>
+      </tr>`;
+    })
+    .join("");
+
+  cuerpo.querySelectorAll("tr[data-sku]").forEach((fila, i) => {
+    fila._producto = pagina.items[i];
+  });
+
+  const faltan = pagina.total - pagina.items.length;
+  $("mas").innerHTML = faltan > 0
+    ? `<button type="button" class="plano" id="ver-mas">Ver ${Math.min(faltan, POR_PAGINA)} más
+         (de ${pagina.total} en total)</button>`
+    : `<p class="pista">${pagina.total} resultado${pagina.total === 1 ? "" : "s"}.</p>`;
+}
+
+$("mas").onclick = (evento) => {
+  if (evento.target.id === "ver-mas") buscar(true);
 };
+
+$("resultados").onclick = (evento) => {
+  if (!evento.target.classList.contains("agregar")) return;
+  const fila = evento.target.closest("tr");
+  agregar(fila._producto, Math.max(1, parseInt(fila.querySelector(".cuantos").value, 10) || 1));
+};
+
+$("q").oninput = DVU.aplazar(() => buscar(), 250);
+$("categoria").onchange = () => buscar();
+
+$("buscador").onsubmit = (evento) => {
+  evento.preventDefault();
+  // Enter con un solo resultado agrega: es lo que pasa al tipear un código de
+  // proveedor, y ahorra el viaje del dedo hasta el botón por cada producto.
+  if (pagina.items.length === 1) {
+    agregar(pagina.items[0], 1);
+    $("q").select();
+  }
+};
+
+/* --- enviar --------------------------------------------------------------- */
+
+function resumenWhatsapp(pedido) {
+  const lineas = pedido.lineas
+    .map(
+      (l) =>
+        `• ${l.cantidad / l.multiplo_venta} × ${l.descripcion} ` +
+        `(${l.cantidad} un.) ${DVU.pesos(l.total_linea_clp)}`
+    )
+    .join("\n");
+  return (
+    `Pedido ${pedido.numero}\n${pedido.cliente_razon_social}\n\n${lineas}\n\n` +
+    `Neto ${DVU.pesos(pedido.neto_clp)}\nIVA ${DVU.pesos(pedido.iva_clp)}\n` +
+    `Total ${DVU.pesos(pedido.total_clp)}`
+  );
+}
+
+async function enviar() {
+  if (!lista?.lineas.length) return DVU.avisar(mensaje, "La lista no tiene líneas.", "error");
+  if (totales.con_problema) {
+    return DVU.avisar(mensaje, "Hay líneas que no se pueden pedir así. Arréglalas primero.", "error");
+  }
+
+  // Lo que quedó sin guardar se manda antes de enviar: el borrador del servidor es lo
+  // que se convierte en pedido, no lo que hay en pantalla. Si eso falla no se pregunta
+  // nada: enviaría una lista distinta de la que el vendedor está mirando.
+  guardarPronto.cancelar();
+  try {
+    await almacen.guardar(lista);
+  } catch (e) {
+    return DVU.avisar(mensaje, `No se pudo guardar la lista, así que no se envió: ${e.message}`, "error");
+  }
+
+  $("confirmar-cuerpo").innerHTML = `
+    <p><strong>${DVU.escapar(lista.cliente_razon_social)}</strong><br>
+    ${lista.lineas.length} línea${lista.lineas.length === 1 ? "" : "s"} ·
+    <strong>${DVU.pesos(totales.total_clp)}</strong> con IVA</p>
+    <p class="pista">Después de enviarlo, el pedido lo toma bodega y ya no se edita acá.</p>`;
+  $("confirmar").showModal();
+}
+
+$("confirmar-no").onclick = () => $("confirmar").close();
+$("confirmar-si").onclick = async () => {
+  $("confirmar").close();
+  const boton = $("enviar");
+  boton.disabled = true;
+  try {
+    const pedido = await almacen.enviar(lista);
+    DVU.avisar(
+      mensaje,
+      `Pedido ${pedido.numero} enviado. Neto ${DVU.pesos(pedido.neto_clp)} · ` +
+      `IVA ${DVU.pesos(pedido.iva_clp)} · Total ${DVU.pesos(pedido.total_clp)}.`,
+      "ok"
+    );
+    // El pedido sigue viajando por WhatsApp mientras el cliente no entre a la web: el
+    // vendedor le manda el resumen para que confirme antes de que salga el camión.
+    const compartir = document.createElement("button");
+    compartir.type = "button";
+    compartir.className = "plano";
+    compartir.textContent = "Mandarlo por WhatsApp";
+    compartir.onclick = () => DVU.porWhatsapp(resumenWhatsapp(pedido));
+    mensaje.append(" ", compartir);
+
+    if (!almacen.guardaVarias) sessionStorage.removeItem(CLAVE_LOCAL);
+    cerrar();
+    cargarMios();
+  } catch (e) {
+    DVU.avisar(mensaje, e.message, "error");
+  } finally {
+    boton.disabled = false;
+  }
+};
+
+$("enviar").onclick = enviar;
+$("enviar-barra").onclick = enviar;
+$("ir-lista").onclick = () => $("tarjeta-lista").scrollIntoView({ behavior: "smooth" });
+$("cerrar").onclick = cerrar;
+
+$("descartar").onclick = async () => {
+  // Descartar es la única acción de esta página que pierde trabajo. Se pregunta.
+  if (!confirm(`¿Descartar la lista de ${lista.cliente_razon_social}?`)) return;
+  try {
+    await almacen.descartar(lista);
+    DVU.avisar(mensaje, "Lista descartada.", "info");
+    cerrar();
+  } catch (e) {
+    DVU.avisar(mensaje, e.message, "error");
+  }
+};
+
+/* --- el panel de listas --------------------------------------------------- */
+
+async function cargarListas() {
+  if (!almacen.guardaVarias) return;
+  const caja = $("listas");
+  try {
+    const borradores = await almacen.listar();
+    caja.innerHTML = borradores.length
+      ? borradores
+          .map(
+            (b) => `
+        <div class="lista-guardada" data-uuid="${b.client_uuid}">
+          <div>
+            <strong>${DVU.escapar(b.cliente_razon_social)}</strong>
+            <p class="pista">
+              ${b.lineas.length} línea${b.lineas.length === 1 ? "" : "s"} ·
+              ${DVU.pesos(b.total_clp)} · ${cuando(b.actualizado_en)}
+            </p>
+          </div>
+          <div class="acciones">
+            <button type="button" class="abrir">Abrir</button>
+          </div>
+        </div>`
+          )
+          .join("")
+      : '<p class="pista">No tienes listas abiertas. Empieza una acá abajo.</p>';
+    caja._borradores = borradores;
+  } catch (e) {
+    caja.innerHTML = `<p class="pista">${DVU.escapar(e.message)}</p>`;
+  }
+}
+
+/** «hace 10 min» dice más que una hora exacta cuando lo que importa es qué tan fresca
+ *  está la lista. Pasado el día se muestra la fecha, que es lo que uno recuerda. */
+function cuando(iso) {
+  if (!iso) return "";
+  const minutos = Math.round((Date.now() - new Date(iso)) / 60000);
+  if (minutos < 1) return "recién";
+  if (minutos < 60) return `hace ${minutos} min`;
+  if (minutos < 60 * 24) return `hace ${Math.round(minutos / 60)} h`;
+  return new Date(iso).toLocaleDateString("es-CL");
+}
+
+$("listas").onclick = (evento) => {
+  if (!evento.target.classList.contains("abrir")) return;
+  const uuid = evento.target.closest("[data-uuid]").dataset.uuid;
+  abrir($("listas")._borradores.find((b) => b.client_uuid === uuid));
+};
+
+/* --- clientes ------------------------------------------------------------- */
+
+/** El desplegable de doscientas ferreterías no se puede usar en un celular. Acá se
+ *  escribe y el navegador filtra; lo escrito se resuelve contra la cartera cargada. */
+function resolverCliente(texto) {
+  const escrito = texto.trim().toLowerCase();
+  if (!escrito) return null;
+  for (const cliente of cartera.values()) {
+    const etiqueta = `${cliente.razon_social} — ${cliente.rut}`.toLowerCase();
+    if (etiqueta === escrito || cliente.rut.toLowerCase() === escrito) return cliente;
+  }
+  const parciales = [...cartera.values()].filter((c) =>
+    `${c.razon_social} ${c.rut}`.toLowerCase().includes(escrito)
+  );
+  return parciales.length === 1 ? parciales[0] : null;
+}
+
+$("form-nueva").onsubmit = async (evento) => {
+  evento.preventDefault();
+  const cliente = resolverCliente($("cliente-nuevo").value);
+  if (!cliente) {
+    return DVU.avisar(mensaje, "Elige una ferretería de la lista para empezar.", "error");
+  }
+  try {
+    abrir(await almacen.crear(cliente));
+    $("cliente-nuevo").value = "";
+    cargarListas();
+  } catch (e) {
+    DVU.avisar(mensaje, e.message, "error");
+  }
+};
+
+async function cargarClientes() {
+  try {
+    const respuesta = await DVU.pedir("/clientes?limite=200");
+    respuesta.items.forEach((c) => cartera.set(c.rut, c));
+    $("clientes").innerHTML = respuesta.items
+      .map((c) => `<option value="${DVU.escapar(c.razon_social)} — ${DVU.escapar(c.rut)}"></option>`)
+      .join("");
+  } catch (e) {
+    DVU.avisar(mensaje, `No se pudo cargar tu cartera: ${e.message}`, "error");
+  }
+}
+
+async function cargarCategorias() {
+  try {
+    const categorias = await DVU.pedir("/categorias");
+    $("categoria").innerHTML =
+      '<option value="">Todas</option>' +
+      categorias
+        .map((c) => `<option value="${DVU.escapar(c.slug)}">${DVU.escapar(c.nombre)} (${c.productos})</option>`)
+        .join("");
+  } catch { /* sin categorías se busca por texto, que es como se busca hoy */ }
+}
+
+/* --- mis últimos pedidos -------------------------------------------------- */
+
+async function cargarMios() {
+  const cuerpo = $("mios");
+  try {
+    const respuesta = await DVU.pedir("/pedidos?limite=10");
+    cuerpo.innerHTML = respuesta.items.length
+      ? respuesta.items
+          .map(
+            (p) => `
+        <tr>
+          <td><code>${DVU.escapar(p.numero)}</code></td>
+          <td>${DVU.escapar(p.cliente_razon_social || p.cliente_rut)}</td>
+          <td class="numero">${p.lineas.length}</td>
+          <td class="numero">${DVU.pesos(p.total_clp)}</td>
+          <td>${DVU.escapar(p.estado_etiqueta)}</td>
+          <td>${p.sincronizado_en ? new Date(p.sincronizado_en).toLocaleDateString("es-CL") : ""}</td>
+          <td><button type="button" class="plano repetir" data-numero="${DVU.escapar(p.numero)}"
+                >Repetir</button></td>
+        </tr>`
+          )
+          .join("")
+      : '<tr><td colspan="7">Todavía no enviaste ninguno.</td></tr>';
+    cuerpo._pedidos = respuesta.items;
+  } catch (e) {
+    cuerpo.innerHTML = `<tr><td colspan="7">${DVU.escapar(e.message)}</td></tr>`;
+  }
+}
+
+$("mios").onclick = async (evento) => {
+  if (!evento.target.classList.contains("repetir")) return;
+  const pedido = $("mios")._pedidos.find((p) => p.numero === evento.target.dataset.numero);
+  const cliente = cartera.get(pedido.cliente_rut) || {
+    rut: pedido.cliente_rut,
+    razon_social: pedido.cliente_razon_social,
+  };
+  try {
+    // Las cantidades van tal cual venían. Si el envase cambió de tamaño desde entonces,
+    // la cotización marca la línea y el vendedor decide: corregirla en silencio sería
+    // cambiarle el pedido al cliente sin decirle.
+    abrir(await almacen.crear(cliente, pedido.lineas));
+    DVU.avisar(mensaje, `Lista armada con lo del pedido ${pedido.numero}. Revísala y envíala.`, "ok");
+  } catch (e) {
+    DVU.avisar(mensaje, e.message, "error");
+  }
+};
+
+/* --- carga inicial -------------------------------------------------------- */
 
 DVU.proteger({
   rol: ["vendedor", "cliente"],
-  alIngresar: () => {
-    cargarClientes();
+  alIngresar: async (quien) => {
+    usuario = quien;
+    almacen = quien.rol === "vendedor" ? enServidor : enNavegador;
+    $("listas").hidden = !almacen.guardaVarias;
+    if (!almacen.guardaVarias) {
+      $("pista-listas").textContent =
+        "Tu pedido se arma acá y se guarda mientras la pestaña siga abierta. " +
+        "Las listas que se retoman después son de los vendedores.";
+    }
+
+    await cargarClientes();
     cargarCategorias();
-    dibujarCarrito();
     cargarMios();
-    buscar();
+    await cargarListas();
+
+    // Sin panel de listas —rol `cliente`— se retoma sola la única que hay.
+    if (!almacen.guardaVarias) {
+      const [guardada] = await almacen.listar();
+      if (guardada) abrir(guardada);
+    }
   },
 });
 </script>

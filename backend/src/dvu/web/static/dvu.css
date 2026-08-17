@@ -603,10 +603,119 @@ table.editable .edit.guardado { background: #dcfce7; border-left-color: var(--ve
 
 .alta-pagina { margin-top: 16px; border-top: 1px solid var(--gris-borde); padding-top: 16px; }
 
+/* --- armar el pedido ------------------------------------------------------ */
+
+/* Sin `align-items`: la tira de páginas de `/admin` apila sus acciones en columna y
+ * centrarlas las encogería al ancho del texto. */
+.acciones { display: flex; gap: 8px; flex-wrap: wrap; }
+
+.cabecera-lista {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  border-bottom: 1px solid var(--gris-borde);
+  padding-bottom: 10px;
+  margin-bottom: 14px;
+}
+.cabecera-lista h2 { margin: 0; }
+.cabecera-lista .pista { margin: 2px 0 0; }
+.cabecera-lista .acciones, .barra-pedido .acciones { align-items: center; }
+
+/* Estado del guardado. Se dice siempre, incluso cuando salió bien: en terreno, no saber
+ * si la lista quedó guardada obliga a volver a revisarla. */
+.guardado { font-size: 12px; color: var(--gris); }
+.guardado.ok::before { content: "✓ "; color: var(--verde); }
+.guardado.error { color: var(--rojo); font-weight: 600; }
+
+.cuenta {
+  font-weight: normal;
+  color: var(--gris);
+  font-size: 12px;
+}
+
+.lista-guardada {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--gris-borde);
+}
+.lista-guardada:last-child { border-bottom: 0; }
+.lista-guardada .pista { margin: 2px 0 0; }
+
+/* El contador de envases. Los botones son grandes a propósito: esto se usa de pie, con
+ * el celular en una mano y el catálogo en la otra. */
+.contador { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
+.contador button {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  font-size: 18px;
+  line-height: 1;
+}
+.contador b { min-width: 2ch; text-align: center; font-variant-numeric: tabular-nums; }
+
+table.datos .cuantos { width: 68px; }
+
+/* Una línea que no se puede pedir así. No se corrige sola: el vendedor tiene que verla
+ * antes de comprometerla con el cliente. */
+tr.linea-mala { background: #fef2f2; }
+tr.linea-mala .problema { color: var(--rojo); font-weight: 600; }
+tr.linea-mala .arreglar { margin-top: 4px; }
+
+.pastilla.puesta { background: var(--azul-estado); color: #06305c; }
+
+table.datos tfoot th { background: #f9fafb; }
+table.datos tfoot tr.total th { font-size: 16px; color: var(--rojo); background: #fff7f7; }
+
+/* La barra de abajo: mientras se buscan productos la lista queda fuera de pantalla, y
+ * el vendedor tiene que poder responder «cuánto llevamos» sin subir a mirar. */
+.barra-pedido {
+  position: sticky;
+  bottom: 0;
+  z-index: 20;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  margin: 0 auto;
+  max-width: 1180px;
+  background: var(--papel);
+  border-top: 2px solid var(--rojo);
+  box-shadow: 0 -2px 10px rgb(0 0 0 / 12%);
+}
+.barra-pedido .resumen { display: flex; flex-direction: column; }
+.barra-pedido strong { font-size: 18px; color: var(--rojo); }
+.barra-pedido .pista { margin: 0; }
+
+dialog.confirmacion {
+  border: 0;
+  border-radius: 8px;
+  padding: 20px;
+  width: min(420px, 92vw);
+  box-shadow: 0 10px 40px rgb(0 0 0 / 35%);
+}
+dialog.confirmacion::backdrop { background: rgb(0 0 0 / 55%); }
+dialog.confirmacion h3 { margin: 0 0 10px; }
+
+kbd {
+  background: #f3f4f6;
+  border: 1px solid var(--gris-borde);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  padding: 0 4px;
+  font-size: 12px;
+}
+
 @media (max-width: 720px) {
   .banda { height: 72px; }
   .banda h1 { font-size: 24px; }
   .banda .logo { width: 46px; height: 46px; font-size: 28px; }
   table.catalogo { font-size: 11px; }
   .col-marca, .col-medida { display: none; }
+  .barra-pedido { padding: 8px 12px; }
+  .cabecera-lista { flex-direction: column; }
 }

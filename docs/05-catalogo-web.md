@@ -246,18 +246,72 @@ Decisiones:
 
 ## El pedido desde el catálogo
 
-`/pedido` reemplaza el mensaje de WhatsApp con el pedido: busca en el catálogo (por
-texto o por categoría), arma el carrito, elige el cliente de su cartera y envía.
+`/pedido` reemplaza el mensaje de WhatsApp con el pedido: se abre una lista para una
+ferretería, se busca en el catálogo, se agrega, y al final se envía.
+
+El supuesto que hay que tener a la vista es cómo se arma un pedido de verdad: **el
+ferretero dicta**. Canta treinta productos seguidos mientras atiende el mesón, y cada
+roce por producto se multiplica por treinta. La otra mitad del supuesto es que la mañana
+del vendedor son cinco ferreterías, no una: el pedido se interrumpe, se retoma, y a veces
+se termina en otro equipo.
+
+### Las listas viven en el servidor
+
+Una lista a medias es un pedido en estado `borrador` (`/pedidos/borradores`), no algo
+guardado en el navegador. Antes el carrito estaba en `sessionStorage` y cerrar la pestaña
+—o que se apague el celular— era perder el trabajo con el cliente al lado.
+
+- **Un borrador no es un pedido.** No tiene folio, no aparece en `GET /pedidos`, no entra
+  al Excel de ventas y no se puede facturar. `numero` es nulo hasta que se envía
+  (migración `c8f1a6b34d92`): darle folio al crearlo quemaría un número de la secuencia
+  por cada lista que nunca se manda, y eso se ve después como huecos en la correlatividad
+  que alguien tiene que explicar.
+- **Guardar es permisivo; enviar es estricto.** El borrador acepta una cantidad que no es
+  múltiplo del envase y la deja marcada. Rechazar el guardado obligaría a arreglarla con
+  el cliente esperando, o a perderla. Al enviar sí se valida todo.
+- **Se manda la lista entera en cada guardado**, no «esta línea cambió»: es lo único que
+  no depende de qué había antes, y por lo tanto lo único que no se desincroniza si la
+  misma lista está abierta en el celular y en el computador.
+- **Al enviar se vuelven a leer los precios del catálogo.** El precio que vale es el del
+  momento en que se hace el pedido, no el de cuando se abrió la lista, que pueden ser días
+  distintos. Recién ahí se congela.
+- **Descartar no borra.** La lista queda `anulado` con su motivo, como todo acá.
+- Las listas son **del vendedor** que las arma. Un usuario con rol `cliente` no tiene a
+  quién atribuírselas —`vendedor_id` queda nulo y no hay vínculo usuario↔cliente— así que
+  esa página arma una sola lista en el navegador y la manda con `POST /pedidos`.
+
+### Bajar el costo de cada producto
+
+- **Se busca mientras se escribe** y con <kbd>Enter</kbd> se agrega cuando queda un solo
+  resultado, que es lo que pasa al tipear un código de proveedor. Un botón «Buscar» son
+  dos toques más por producto.
+- **La fila del buscador dice cuánto de eso ya lleva la lista.** Sumar en silencio es cómo
+  se agrega dos veces el mismo codo sin notarlo.
+- **Miniatura del producto**, botones `−` / `+` grandes —esto se usa de pie— y una barra
+  fija abajo con el total, porque mientras se busca la lista queda fuera de pantalla y
+  «¿cuánto llevamos?» es una pregunta del cliente, no del sistema.
+- **«Repetir»** sobre un pedido anterior arma una lista nueva con las mismas líneas. La
+  ferretería pide casi siempre lo mismo; volver a buscar treinta productos es media
+  visita. Si el envase cambió de tamaño desde entonces, la línea queda marcada y el
+  vendedor decide: corregirla sola sería cambiarle el pedido al cliente sin decirle.
+- **El cliente se elige escribiendo**, no de un desplegable de doscientas ferreterías.
+
+### El dinero lo calcula el servidor
 
 - Las cantidades se escriben **en envases**, no en unidades. El vendedor pone «2 cajas» y
   la página envía `2 × multiplo_venta`: la cantidad es múltiplo válido por construcción y
   no hay forma de tipear un número que el backend vaya a rechazar.
-- El carrito vive en `sessionStorage` con un `client_uuid` que **no se regenera entre
-  intentos** —sólo tras un envío exitoso o al vaciarlo—. Si se corta la señal al enviar,
+- La página **no calcula IVA**. `POST /pedidos/cotizar` devuelve neto, IVA, total y el
+  precio de hoy de cada línea sin crear nada, y se llama en cada cambio. Así el vendedor
+  puede responder «¿en cuánto me queda?» antes de cerrar, la regla del impuesto sigue
+  viviendo en un solo lugar, y los múltiplos malos se ven mientras se arma la lista y no
+  en el 422 del envío. Cotizar **no falla** por una línea mala: la marca y sigue.
+- El `client_uuid` **no se regenera entre intentos**. Si se corta la señal al enviar,
   reintentar cae en la idempotencia del backend en vez de duplicar el pedido. Es el mismo
   contrato que después va a usar la app Flutter offline-first.
-- La página **no calcula IVA**: muestra la suma neta y después los totales que devolvió
-  el servidor. La regla del impuesto vive en un solo lugar y esta página no la repite.
+- **Enviar pide confirmación** con el resumen, y después ofrece **mandarlo por WhatsApp**:
+  el pedido va a seguir viajando por ahí mientras el cliente no entre a la web, y copiarlo
+  a mano es el paso donde el vendedor abandona la herramienta.
 
 ## Cómo probarlo
 
@@ -273,9 +327,10 @@ Después, en <http://localhost:8000>:
 1. `/` — busca «codo» o pega un código de proveedor (`PR/49573`, `KM521`), o filtrá por
    categoría en el desplegable. Con sesión iniciada, «↓ PDF» baja lo que estás viendo
    con el diseño del impreso, y «↓ Lista de precios» lo mismo sin fotos.
-2. `/pedido` — entra como `vendedor@dvu.cl` / `dvu-dev-1234`, filtra por «Gasfitería»,
-   agrega dos envases de un codo, elige el cliente y envía. Probá recargar la página
-   antes de enviar: el carrito sigue ahí.
+2. `/pedido` — entra como `vendedor@dvu.cl` / `dvu-dev-1234`, empieza una lista para una
+   ferretería, escribe «codo» y agrega dos envases. Probá **cerrar la pestaña** antes de
+   enviar y volver a entrar: la lista sigue en «Mis listas», porque vive en el servidor.
+   Envíalo y después apretá «Repetir» sobre el pedido: arma la misma lista de nuevo.
 3. `/vendedor` — escribe un mensaje como se lo mandarías al grupo: *«Ferretería El
    Martillo, abono factura 33780 por 510.459, BCI op 12345678»*. El monto y la factura
    salen solos del texto.
