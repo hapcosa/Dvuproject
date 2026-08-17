@@ -1,9 +1,7 @@
 {% extends "base.html" %}
 
 {% block contenido %}
-{% with pista_login = "Sólo cobranza y administración. En desarrollo: admin@dvu.cl / dvu-dev-1234" %}
-  {% include "_login.html" %}
-{% endwith %}
+{% include "_sin_acceso.html" %}
 
 <div id="app" hidden>
   <section class="tarjeta">

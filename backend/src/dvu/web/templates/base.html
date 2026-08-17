@@ -8,14 +8,17 @@
   <link rel="stylesheet" href="/estatico/dvu.css">
 </head>
 <body>
+  {# La sesión va primero: quién eres —o el botón para entrar— es lo que decide qué
+     significan los enlaces que siguen. Lo llena `dvu.js` en toda página, también en las
+     públicas, así que el hueco nunca queda mudo. #}
   <nav class="nav">
+    <span class="sesion" id="sesion"></span>
+    <span class="divisor" aria-hidden="true"></span>
     <a href="/" {% if request.url.path == '/' %}class="activo"{% endif %}>Catálogo</a>
     <a href="/pedido" {% if request.url.path == '/pedido' %}class="activo"{% endif %}>Pedido</a>
     <a href="/vendedor" {% if request.url.path == '/vendedor' %}class="activo"{% endif %}>Comprobantes</a>
     <a href="/cobranza" {% if request.url.path == '/cobranza' %}class="activo"{% endif %}>Cobranza</a>
     <a href="/admin" {% if request.url.path == '/admin' %}class="activo"{% endif %}>Administrar</a>
-    <span class="sep"></span>
-    <span class="sesion" id="sesion"></span>
   </nav>
 
   <main class="hoja">
