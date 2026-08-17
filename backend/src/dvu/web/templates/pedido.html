@@ -1,9 +1,7 @@
 {% extends "base.html" %}
 
 {% block contenido %}
-{% with pista_login = "Entra con tu usuario de vendedor. En desarrollo: vendedor@dvu.cl / dvu-dev-1234" %}
-  {% include "_login.html" %}
-{% endwith %}
+{% include "_sin_acceso.html" %}
 
 <div id="app" hidden>
   <div id="mensaje" hidden></div>

@@ -18,6 +18,25 @@ const DVU = (() => {
   const CLAVE = "dvu_token";
   const CLAVE_REFRESH = "dvu_refresh";
 
+  //: Los dos endpoints que **entregan** sesión. Un 401 acá significa «esas credenciales
+  //: no sirven», no «la tuya venció»: son estados opuestos y confundirlos le decía «La
+  //: sesión venció, ingresa de nuevo» a quien nunca había entrado y sólo tecleó mal la
+  //: contraseña —el consejo, además, era exactamente lo que estaba intentando hacer—.
+  const ENTREGAN_SESION = ["/auth/login", "/auth/refresh"];
+
+  //: Qué rol abre qué página. Vive acá y no en cada plantilla porque se usa en dos
+  //: lados —el aviso de «esta página no es para tu cuenta» y los atajos que ofrece— y
+  //: dos copias se desincronizan. `admin` entra a todas, igual que en `exige_rol`.
+  const PAGINAS = [
+    { ruta: "/", nombre: "Catálogo", roles: null },
+    { ruta: "/pedido", nombre: "Armar pedido", roles: ["vendedor", "cliente"] },
+    { ruta: "/vendedor", nombre: "Comprobantes", roles: ["vendedor"] },
+    { ruta: "/cobranza", nombre: "Cobranza", roles: ["admin"] },
+    { ruta: "/admin", nombre: "Administrar catálogo", roles: ["admin"] },
+  ];
+
+  const alcanza = (rol, roles) => !roles || rol === "admin" || roles.includes(rol);
+
   const token = () => sessionStorage.getItem(CLAVE);
 
   //: Una sola renovación en vuelo. Si tres requests vencen a la vez —pasa al volver de
@@ -48,6 +67,17 @@ const DVU = (() => {
     if (datos.refresh_token) sessionStorage.setItem(CLAVE_REFRESH, datos.refresh_token);
   }
 
+  //: Quién entró, para poder decir «tu cuenta es vendedor» cuando el servidor responde
+  //: 403. El servidor sabe qué rol hace falta y el navegador sabe cuál tiene: el mensaje
+  //: entendible necesita las dos mitades.
+  let quienEntro = null;
+
+  function cerrarSesion() {
+    sessionStorage.removeItem(CLAVE);
+    sessionStorage.removeItem(CLAVE_REFRESH);
+    quienEntro = null;
+  }
+
   /** Un error de una línea, en palabras. Llegan de dos formas: la validación de FastAPI
    *  (`loc`/`msg`) y las reglas del dominio, que hablan de un SKU (`sku`/`error`). */
   const explicar = (e) =>
@@ -66,11 +96,18 @@ const DVU = (() => {
 
     const respuesta = await fetch(base + ruta, { ...opciones, body: cuerpo, headers: cabeceras });
 
-    if (respuesta.status === 401) {
+    // Un 401 sólo es «se venció» si mandamos una credencial y el servidor la rechazó.
+    // Si no mandamos ninguna, o si el que contesta es el endpoint que las entrega, el
+    // 401 es su respuesta y su `detail` dice lo que de verdad pasó: se deja caer al
+    // manejo de abajo, que lo muestra tal cual.
+    const entregaSesion = ENTREGAN_SESION.some((r) => ruta.startsWith(r));
+    if (respuesta.status === 401 && cabeceras.Authorization && !entregaSesion) {
       if (!reintentando && (await renovar())) return pedir(ruta, opciones, true);
-      sessionStorage.removeItem(CLAVE);
-      sessionStorage.removeItem(CLAVE_REFRESH);
-      throw new Error("La sesión venció. Ingresa de nuevo.");
+      cerrarSesion();
+      throw Object.assign(new Error("La sesión venció. Ingresa de nuevo."), {
+        estado: 401,
+        vencida: true,
+      });
     }
     if (!respuesta.ok) {
       // El detalle del backend es el mensaje útil (qué falta, qué chocó). Se muestra
@@ -84,11 +121,19 @@ const DVU = (() => {
         else if (Array.isArray(crudo)) detalle = crudo.map(explicar).join(" · ");
       } catch { /* respuesta sin JSON: queda el código */ }
 
+      // Un 403 no es un error de datos: es «tu cuenta no puede hacer esto». Dicho así
+      // —con el rol que tienes, no sólo el que falta— se entiende sin adivinar.
+      if (respuesta.status === 403) {
+        const tuyo = quienEntro ? ` Tu cuenta es «${quienEntro.rol}».` : "";
+        detalle = `No puedes hacer esto: ${detalle.replace(/^Se requiere/, "se requiere")}.${tuyo}`;
+      }
+
       // El detalle crudo viaja en el error para que quien llama pueda hacer algo más
       // que mostrarlo: marcar las líneas malas del pedido, por ejemplo.
       const error = new Error(detalle);
       error.estado = respuesta.status;
       error.detalle = crudo;
+      error.sinPermiso = respuesta.status === 403;
       throw error;
     }
     if (respuesta.status === 204) return null;
@@ -102,11 +147,14 @@ const DVU = (() => {
     return yo();
   }
 
-  const yo = () => pedir("/auth/yo");
+  async function yo() {
+    quienEntro = await pedir("/auth/yo");
+    return quienEntro;
+  }
+
   const salir = () => {
-    sessionStorage.removeItem(CLAVE);
-    sessionStorage.removeItem(CLAVE_REFRESH);
-    location.reload();
+    cerrarSesion();
+    location.href = "/";
   };
 
   /** Descarga chica: el archivo entra en memoria sin problema (un .xlsx son cientos de KB). */
@@ -189,51 +237,134 @@ const DVU = (() => {
   const porWhatsapp = (texto) =>
     window.open(`https://wa.me/?text=${encodeURIComponent(texto)}`, "_blank", "noopener");
 
-  /** Muestra el bloque que corresponde al rol y deja la sesión visible arriba. */
-  async function proteger({ rol, alIngresar }) {
-    const login = document.getElementById("login");
-    const app = document.getElementById("app");
+  /* --- sesión ------------------------------------------------------------- */
+
+  /** La URL de la página de ingreso, con dónde volver.
+   *
+   *  `volver` se usa después como destino de una navegación, así que sólo se acepta una
+   *  ruta de este sitio: una URL absoluta ahí es un redirect abierto, y el correo de
+   *  «entra al sistema» es exactamente el lugar donde eso se aprovecha. */
+  function urlDeIngreso(destino = location.pathname + location.search) {
+    return `/ingresar?volver=${encodeURIComponent(destino)}`;
+  }
+
+  const rutaLocal = (v) => (v && v.startsWith("/") && !v.startsWith("//") ? v : "/");
+
+  /** Deja la sesión visible en la barra de arriba, en toda página.
+   *
+   *  Se pinta siempre, también sin entrar: saber que se puede entrar —y por dónde— es
+   *  parte de la página. Antes el hueco quedaba vacío y la única puerta era el formulario
+   *  enterrado dentro de la página privada a la que ya no podías llegar. */
+  function pintarSesion(usuario) {
     const sesion = document.getElementById("sesion");
+    if (!sesion) return;
 
-    const mostrar = (usuario) => {
-      login.hidden = true;
-      app.hidden = false;
-      sesion.innerHTML =
-        `${escapar(usuario.nombre)} (${escapar(usuario.rol)}) · ` +
-        '<a href="#" id="salir">salir</a>';
-      document.getElementById("salir").onclick = (e) => { e.preventDefault(); salir(); };
-      alIngresar?.(usuario);
-    };
+    if (!usuario) {
+      const aca = location.pathname === "/ingresar";
+      sesion.innerHTML = aca
+        ? '<span class="anonimo">Sin sesión</span>'
+        : `<a class="entrar" href="${escapar(urlDeIngreso())}">Ingresar</a>`;
+      return;
+    }
+    sesion.innerHTML =
+      `<span class="quien">${escapar(usuario.nombre)}</span>` +
+      `<span class="pastilla rol">${escapar(usuario.rol)}</span>` +
+      '<a href="#" id="salir">Salir</a>';
+    document.getElementById("salir").onclick = (e) => { e.preventDefault(); salir(); };
+  }
 
-    if (token()) {
-      try {
-        const usuario = await yo();
-        if (!rol || usuario.rol === "admin" || rol.includes(usuario.rol)) return mostrar(usuario);
-        avisar(document.getElementById("login-error"),
-          `Tu rol (${usuario.rol}) no tiene acceso a esta página.`, "error");
-      } catch { sessionStorage.removeItem(CLAVE); }
+  /** Explica por qué la página está en blanco y ofrece a dónde sí se puede ir.
+   *
+   *  Mandar a la pantalla de ingreso sería mentir: la sesión está perfecta, lo que no
+   *  alcanza es el rol, y volver a entrar con la misma cuenta da lo mismo. */
+  function negarAcceso(usuario, roles) {
+    const bloqueo = document.getElementById("sin-acceso");
+    const app = document.getElementById("app");
+    if (app) app.hidden = true;
+    if (!bloqueo) return;
+
+    const suyas = PAGINAS.filter((p) => alcanza(usuario.rol, p.roles) && p.ruta !== location.pathname);
+    bloqueo.innerHTML =
+      "<h2>Esta página no es para tu cuenta</h2>" +
+      `<div class="aviso error">Esta página es para ${escapar(roles.join(" o "))}. ` +
+      `Entraste como ${escapar(usuario.nombre)}, que es ${escapar(usuario.rol)}.</div>` +
+      (suyas.length
+        ? '<p class="pista">Con tu cuenta puedes usar: ' +
+          suyas.map((p) => `<a href="${p.ruta}">${escapar(p.nombre)}</a>`).join(" · ") +
+          ".</p>"
+        : "") +
+      `<p class="pista">Si te equivocaste de cuenta, <a href="${escapar(urlDeIngreso())}">` +
+      "entra con otra</a>.</p>";
+    bloqueo.hidden = false;
+  }
+
+  /** Deja ver la página sólo a quien corresponde, y explica el resto de los casos.
+   *
+   *  Tres desenlaces distintos que antes eran uno solo: sin sesión se va a ingresar, con
+   *  sesión y sin rol se explica, y si el servidor no contesta se dice eso —y no «la
+   *  sesión venció», que mandaba a reingresar contra un servidor caído—. */
+  let protegida = false;
+
+  async function proteger({ rol, alIngresar }) {
+    const app = document.getElementById("app");
+    const bloqueo = document.getElementById("sin-acceso");
+    protegida = true;
+
+    if (!token()) {
+      location.href = urlDeIngreso();
+      return;
     }
 
-    login.hidden = false;
-    app.hidden = true;
-    document.getElementById("form-login").onsubmit = async (evento) => {
-      evento.preventDefault();
-      const error = document.getElementById("login-error");
-      error.hidden = true;
-      try {
-        const usuario = await ingresar(evento.target.email.value, evento.target.password.value);
-        if (rol && usuario.rol !== "admin" && !rol.includes(usuario.rol)) {
-          return avisar(error, `Tu rol (${usuario.rol}) no tiene acceso a esta página.`, "error");
-        }
-        mostrar(usuario);
-      } catch (e) {
-        avisar(error, e.message, "error");
+    let usuario;
+    try {
+      usuario = await yo();
+    } catch (e) {
+      if (e.estado === 401) {
+        location.href = urlDeIngreso();
+        return;
       }
-    };
+      pintarSesion(null);
+      if (bloqueo) {
+        bloqueo.innerHTML =
+          "<h2>No se pudo comprobar tu sesión</h2>" +
+          `<div class="aviso error">${escapar(e.message)}</div>` +
+          '<p class="pista">El servidor no está respondiendo. Vuelve a cargar la página ' +
+          "en un momento.</p>";
+        bloqueo.hidden = false;
+      }
+      return;
+    }
+
+    pintarSesion(usuario);
+    if (rol && !alcanza(usuario.rol, rol)) return negarAcceso(usuario, rol);
+
+    if (bloqueo) bloqueo.hidden = true;
+    if (app) app.hidden = false;
+    alIngresar?.(usuario);
   }
+
+  /** La barra de arriba se pinta sola en toda página, también en las públicas.
+   *
+   *  En las privadas ya lo hizo `proteger`, que corre antes —el `<script>` del final del
+   *  body se ejecuta antes del `DOMContentLoaded`—: preguntar de nuevo quién soy sería
+   *  un `/auth/yo` por página sin motivo. */
+  async function arrancar() {
+    if (protegida) return;
+    if (!token()) return pintarSesion(null);
+    try {
+      pintarSesion(await yo());
+    } catch {
+      // Token viejo en una pestaña vieja: no es un error que mostrar, es no haber entrado.
+      cerrarSesion();
+      pintarSesion(null);
+    }
+  }
+  document.addEventListener("DOMContentLoaded", arrancar);
 
   return {
     pedir, ingresar, yo, salir, descargar, descargarGrande,
     pesos, escapar, oVacio, avisar, aplazar, porWhatsapp, proteger,
+    pintarSesion, urlDeIngreso, rutaLocal, alcanza, PAGINAS,
+    haySesion: () => Boolean(token()),
   };
 })();

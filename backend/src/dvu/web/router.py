@@ -26,6 +26,7 @@ router = APIRouter(tags=["web"], include_in_schema=False)
 
 PAGINAS = {
     "/": ("catalogo.html", "Catálogo"),
+    "/ingresar": ("ingresar.html", "Ingresar"),
     "/admin": ("admin.html", "Administrar catálogo"),
     "/pedido": ("pedido.html", "Armar pedido"),
     "/vendedor": ("vendedor.html", "Registrar comprobante"),
@@ -34,16 +35,29 @@ PAGINAS = {
 
 
 def _render(request: Request, plantilla: str, titulo: str) -> HTMLResponse:
+    ajustes = get_settings()
     return plantillas.TemplateResponse(
         request=request,
         name=plantilla,
-        context={"titulo": titulo, "api": get_settings().api_prefix},
+        context={
+            "titulo": titulo,
+            "api": ajustes.api_prefix,
+            # Las cuentas de ejemplo se nombran sólo fuera de producción. Son las del
+            # `make seed` y con contraseña conocida: escritas en la pantalla de ingreso
+            # de producción serían una invitación, aunque ahí no existan.
+            "pista_dev": not ajustes.es_produccion,
+        },
     )
 
 
 @router.get("/", response_class=HTMLResponse)
 def catalogo(request: Request) -> HTMLResponse:
     return _render(request, *PAGINAS["/"])
+
+
+@router.get("/ingresar", response_class=HTMLResponse)
+def ingresar(request: Request) -> HTMLResponse:
+    return _render(request, *PAGINAS["/ingresar"])
 
 
 @router.get("/admin", response_class=HTMLResponse)

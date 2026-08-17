@@ -60,8 +60,38 @@ body {
 }
 .nav a:hover { background: rgb(255 255 255 / 12%); color: #fff; }
 .nav a.activo { background: var(--rojo); color: #fff; }
-.nav .sep { flex: 1; }
-.nav .sesion { color: #bfdbfe; font-size: 12px; }
+
+/* La sesión abre la barra, a la izquierda de los enlaces. */
+.nav .sesion {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #bfdbfe;
+  font-size: 12px;
+  min-height: 28px;
+}
+.nav .sesion .quien { font-weight: 600; color: #fff; }
+.nav .sesion .rol {
+  background: rgb(255 255 255 / 16%);
+  color: #dbeafe;
+  text-transform: lowercase;
+}
+.nav .sesion .anonimo { color: #93b4dd; }
+.nav .sesion a { font-size: 12px; padding: 4px 8px; }
+
+/* «Ingresar» es un botón, no un enlace más: es la única acción de la barra. */
+.nav .sesion a.entrar {
+  background: var(--rojo);
+  color: #fff;
+}
+.nav .sesion a.entrar:hover { background: var(--rojo-oscuro); }
+
+.nav .divisor {
+  width: 1px;
+  align-self: stretch;
+  margin: 2px 8px;
+  background: rgb(255 255 255 / 18%);
+}
 
 /* --- banda roja del catálogo -------------------------------------------- */
 
@@ -728,6 +758,44 @@ kbd {
   font-size: 12px;
 }
 
+/* --- ingresar ------------------------------------------------------------ */
+
+dialog.ingreso {
+  border: 0;
+  border-radius: 10px;
+  padding: 24px;
+  width: min(400px, 92vw);
+  box-shadow: 0 12px 48px rgb(0 0 0 / 40%);
+}
+dialog.ingreso::backdrop { background: rgb(15 23 42 / 62%); }
+dialog.ingreso h2 { margin: 0 0 4px; font-size: 19px; }
+dialog.ingreso .campo { margin-bottom: 14px; }
+/* Formulario en una columna: son dos campos, y en el celular la rejilla los apretaba. */
+dialog.ingreso input { width: 100%; }
+dialog.ingreso .pista.dev {
+  margin: 16px 0 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--gris-borde);
+  font-size: 12px;
+}
+
+.acciones-ingreso {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 4px;
+}
+.acciones-ingreso .volver { font-size: 13px; color: var(--gris); }
+/* En el celular el botón manda: dedo gordo, una sola acción posible. */
+.acciones-ingreso button { padding: 10px 22px; }
+
+.bienvenida { max-width: 460px; margin-inline: auto; }
+
+/* El aviso de rol enlaza a donde sí se puede ir: sin eso es un cartel sin salida. */
+#sin-acceso .aviso a,
+#sin-acceso .pista a { font-weight: 600; }
+
 @media (max-width: 720px) {
   .banda { height: 72px; }
   .banda h1 { font-size: 24px; }
@@ -736,4 +804,15 @@ kbd {
   .col-marca, .col-medida { display: none; }
   .barra-pedido { padding: 8px 12px; }
   .cabecera-lista { flex-direction: column; }
+
+  /* La barra de arriba en el celular: la sesión ocupa su propia línea y el divisor
+     vertical no tiene sentido cuando los enlaces bajaron. */
+  .nav { padding: 6px 10px; }
+  .nav .sesion { width: 100%; }
+  .nav .sesion a.entrar { margin-left: auto; }
+  .nav .divisor { display: none; }
+
+  dialog.ingreso { padding: 18px; }
+  .acciones-ingreso { flex-direction: column-reverse; align-items: stretch; }
+  .acciones-ingreso .volver { text-align: center; }
 }

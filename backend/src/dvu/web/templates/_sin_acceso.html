@@ -1,0 +1,8 @@
+{# El hueco donde `DVU.proteger` explica por qué la página no se ve.
+
+   Ya no es un formulario de ingreso: entrar tiene su propia página (`/ingresar`) y quien
+   llega sin sesión va allá. Acá quedan los casos en que la sesión existe y aun así la
+   página no corresponde —el rol no alcanza, o el servidor no contesta—, que son
+   justamente los que antes se disfrazaban de «la sesión venció». El contenido lo pone el
+   JS, que es quien sabe el rol que hace falta y el que tiene la cuenta. #}
+<section id="sin-acceso" class="tarjeta" hidden></section>
