@@ -269,7 +269,11 @@ class Pedido(Base, UUIDMixin, TimestampMixin):
     client_uuid: Mapped[uuid_lib.UUID] = mapped_column(
         PgUUID(as_uuid=True), unique=True, nullable=False, index=True
     )
-    numero: Mapped[str] = mapped_column(String(24), unique=True, nullable=False)
+    #: El folio comercial, `P-2026-000123`. Es **nulo mientras el pedido es un borrador**:
+    #: una lista que el vendedor todavía está armando no es un documento y no debe
+    #: quemar un número de la secuencia, que después se ve como un hueco en la
+    #: correlatividad. Se asigna al enviarlo.
+    numero: Mapped[str | None] = mapped_column(String(24), unique=True)
 
     cliente_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("cliente.id"), index=True)
     vendedor_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("usuario.id"))

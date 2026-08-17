@@ -32,6 +32,20 @@ TRANSICIONES: dict[EstadoPedido, frozenset[EstadoPedido]] = {
 }
 
 
+#: Cómo se lee cada estado en pantalla. `preparacion` y `enviado` son nombres de la
+#: máquina de estados, no del negocio: el vendedor quiere saber si DVU ya lo tiene.
+ETIQUETAS: dict[EstadoPedido, str] = {
+    EstadoPedido.BORRADOR: "Lista sin enviar",
+    EstadoPedido.ENVIADO: "Enviado a DVU",
+    EstadoPedido.CONFIRMADO: "Confirmado",
+    EstadoPedido.PREPARACION: "Preparándose en bodega",
+    EstadoPedido.DESPACHADO: "Despachado",
+    EstadoPedido.ENTREGADO: "Entregado",
+    EstadoPedido.CERRADO: "Cerrado",
+    EstadoPedido.ANULADO: "Anulado",
+}
+
+
 class TransicionInvalida(Exception):
     def __init__(self, desde: EstadoPedido, hasta: EstadoPedido) -> None:
         super().__init__(f"No se puede pasar de '{desde}' a '{hasta}'")
