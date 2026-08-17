@@ -118,7 +118,10 @@ def _emitir(accion: Callable[[], Dte]) -> DteOut:
     except ErrorDte as exc:
         raise HTTPException(status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
 
-    return _a_salida(dte, dte.pedido.numero)
+    # Un DTE sólo se emite sobre un pedido confirmado o más adelante (`validar_emision`),
+    # y para entonces el folio está asignado hace rato. El `or ""` es para el tipo: sólo
+    # los borradores tienen `numero` nulo y ninguno llega hasta acá.
+    return _a_salida(dte, dte.pedido.numero or "")
 
 
 def _pedido(session: Session, numero: str) -> Pedido:

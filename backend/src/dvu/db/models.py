@@ -64,10 +64,16 @@ class CatalogoPagina(Base, TimestampMixin):
     __tablename__ = "catalogo_pagina"
 
     id: Mapped[pk]
+    #: De qué PDF salió y en qué página venía. Es la procedencia, no el orden: dos
+    #: portadas pueden venir las dos de la página 1 de archivos distintos.
     archivo: Mapped[str] = mapped_column(String(255), nullable=False)
     pagina: Mapped[int] = mapped_column(Integer, nullable=False)
     #: `portada`, `promocion` o `contraportada`.
     tipo: Mapped[str] = mapped_column(String(32), nullable=False)
+    #: Posición dentro de su sección, la que el administrador arrastra. El orden entre
+    #: secciones no se guarda: lo fija el tipo (portada al principio, contraportada al
+    #: final), que es lo que el lector reconoce y no algo que convenga poder invertir.
+    orden: Mapped[int] = mapped_column(Integer, default=0, server_default="0", nullable=False)
     key_pdf: Mapped[str] = mapped_column(String(255), nullable=False)
     key_png: Mapped[str] = mapped_column(String(255), nullable=False)
     #: El administrador puede sacar una oferta vencida sin borrar el registro.
@@ -263,7 +269,11 @@ class Pedido(Base, UUIDMixin, TimestampMixin):
     client_uuid: Mapped[uuid_lib.UUID] = mapped_column(
         PgUUID(as_uuid=True), unique=True, nullable=False, index=True
     )
-    numero: Mapped[str] = mapped_column(String(24), unique=True, nullable=False)
+    #: El folio comercial, `P-2026-000123`. Es **nulo mientras el pedido es un borrador**:
+    #: una lista que el vendedor todavía está armando no es un documento y no debe
+    #: quemar un número de la secuencia, que después se ve como un hueco en la
+    #: correlatividad. Se asigna al enviarlo.
+    numero: Mapped[str | None] = mapped_column(String(24), unique=True)
 
     cliente_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("cliente.id"), index=True)
     vendedor_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("usuario.id"))

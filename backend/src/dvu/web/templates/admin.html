@@ -18,6 +18,24 @@
   </section>
 
   <section class="tarjeta">
+    <h3>Páginas de diseño</h3>
+    <p class="pista">
+      La portada, las hojas de oferta y la contraportada: lo que en el catálogo es arte y
+      no tabla. Van en ese orden y no se puede invertir —una contraportada al principio
+      no sería un catálogo—, pero dentro de cada sección el orden lo decides tú:
+      <strong>«Editar» y arrastra</strong>. Quitar una la saca de la web y del PDF, pero
+      <strong>no la borra</strong>: una oferta que sale en agosto suele volver, y se
+      repone con «Reponer».
+    </p>
+    <div id="secciones-diseno">Cargando…</div>
+  </section>
+
+  <!-- Uno solo para las tres secciones, igual que el de las fotos: el botón ✎ de cada
+       página le deja anotado a cuál corresponde el archivo que se elija. -->
+  <input type="file" id="archivo-pagina" hidden
+         accept="application/pdf,image/jpeg,image/png,image/webp">
+
+  <section class="tarjeta">
     <h3>Agregar producto</h3>
     <form id="form-nuevo">
       <div class="rejilla">
@@ -369,7 +387,308 @@ document.getElementById("siguiente").onclick = () => {
   cargar();
 };
 
+/* ---------------------------------------------------------------- páginas de diseño */
+
+/* Las tres secciones en el orden en que se imprimen. El orden entre ellas no se toca —lo
+ * fija el backend (`dvu.db.maqueta`)— y por eso acá tampoco se puede arrastrar una
+ * sección entera: lo que se mueve son las páginas, dentro de una o de una a otra. */
+const SECCIONES = [
+  { tipo: "portada", titulo: "Portada", pie: "Va al principio del catálogo." },
+  { tipo: "promocion", titulo: "Ofertas", pie: "Van después de las tablas de precios." },
+  { tipo: "contraportada", titulo: "Contraportada", pie: "Va al final, cerrando el catálogo." },
+];
+const ROTULO = Object.fromEntries(SECCIONES.map((s) => [s.tipo, s.titulo]));
+
+const contenedorSecciones = document.getElementById("secciones-diseno");
+const selectorPagina = document.getElementById("archivo-pagina");
+// Igual que las fotos: la vista previa vive en una URL que no cambia al reemplazarla,
+// así que al reemplazar el archivo hay que ensuciarla o el navegador muestra la vieja.
+let versionPagina = 0;
+// Qué secciones están en modo edición. Sobrevive a los repintados, que son constantes:
+// cada arrastre y cada botón vuelven a pedir la lista y a dibujar.
+const editando = new Set();
+
+const tiraDe = (tipo) => contenedorSecciones.querySelector(`[data-tira="${tipo}"]`);
+
+function tarjetaPagina(p) {
+  const edita = editando.has(p.tipo);
+  return `
+    <figure class="pagina-diseno${p.activa ? "" : " inactiva"}"
+            data-pagina="${p.id}" data-tipo="${p.tipo}"
+            ${edita ? 'draggable="true"' : ""}>
+      ${edita ? '<span class="agarre" aria-hidden="true">⠿</span>' : ""}
+      <img loading="lazy" alt="${DVU.escapar(ROTULO[p.tipo] || p.tipo)}"
+           src="${API}/catalogo/paginas/${p.id}/imagen?v=${versionPagina}">
+      <figcaption>
+        ${edita ? `
+          <div class="mover">
+            <button class="plano" data-mover="${p.id}" data-paso="-1"
+                    aria-label="Mover antes">◀</button>
+            <button class="plano" data-mover="${p.id}" data-paso="1"
+                    aria-label="Mover después">▶</button>
+          </div>
+          <div class="acciones">
+            <button class="plano" data-reemplazar="${p.id}"
+                    title="Reemplazar el archivo de esta página">✎ Reemplazar</button>
+            <button class="plano" data-quitar="${p.id}"
+              >${p.activa ? "✕ Quitar" : "↩ Reponer"}</button>
+          </div>` : ""}
+      </figcaption>
+    </figure>`;
+}
+
+function seccionVacia(edita) {
+  return `<p class="pista sin-paginas">Todavía no hay páginas acá.${
+    edita ? " Sube una con el formulario de abajo." : ""}</p>`;
+}
+
+function pintarSeccion(seccion, paginas) {
+  const edita = editando.has(seccion.tipo);
+  const suyas = paginas.filter((p) => p.tipo === seccion.tipo);
+  return `
+    <section class="seccion-paginas${edita ? " editando" : ""}" data-seccion="${seccion.tipo}">
+      <header>
+        <h4>${seccion.titulo} <span class="cuenta">${suyas.length}</span></h4>
+        <button class="plano" data-editar="${seccion.tipo}"
+          >${edita ? "Listo" : "Editar"}</button>
+      </header>
+      <p class="pista">${seccion.pie}</p>
+      <div class="tira-paginas" data-tira="${seccion.tipo}">
+        ${suyas.length ? suyas.map(tarjetaPagina).join("") : seccionVacia(edita)}
+      </div>
+      ${edita ? formularioAlta(seccion) : ""}
+    </section>`;
+}
+
+function formularioAlta(seccion) {
+  return `
+    <form class="alta-pagina" data-alta="${seccion.tipo}">
+      <label for="alta-${seccion.tipo}">Agregar una página a ${seccion.titulo.toLowerCase()}</label>
+      <input id="alta-${seccion.tipo}" name="archivo" type="file" required
+             accept="application/pdf,image/jpeg,image/png,image/webp">
+      <p class="pista">
+        Se acepta PDF o imagen. <strong>Si tienes el PDF, súbelo</strong>: conserva el
+        vector y el texto del original, y el catálogo exportado sale idéntico a imprenta.
+        Desde una imagen se arma igual, pero queda rasterizada.
+      </p>
+      <button type="submit">+ Agregar página</button>
+    </form>`;
+}
+
+async function cargarPaginas() {
+  try {
+    const paginas = await DVU.pedir("/catalogo/paginas?incluir_inactivas=true");
+    contenedorSecciones.innerHTML = SECCIONES.map((s) => pintarSeccion(s, paginas)).join("");
+  } catch (e) {
+    contenedorSecciones.innerHTML = "";
+    DVU.avisar(mensaje, e.message, "error");
+  }
+}
+
+/** Manda el orden de una sección tal como quedó en pantalla.
+ *
+ *  Va la lista entera y no «esta página se movió tres lugares»: es lo único que no
+ *  depende de qué había antes en la base, y por lo tanto lo único que no se desincroniza
+ *  si el repintado y el arrastre se cruzan. */
+async function guardarOrden(tipo) {
+  const tira = tiraDe(tipo);
+  if (!tira) return;
+  const ids = [...tira.querySelectorAll(".pagina-diseno")].map((f) => Number(f.dataset.pagina));
+  if (ids.length) await DVU.pedir("/catalogo/paginas/orden", { method: "PUT", body: { ids } });
+}
+
+/* --- arrastrar ------------------------------------------------------------
+ *
+ * Con la API nativa del navegador y sin librería: son tres eventos y el prototipo no
+ * tiene build donde meter una dependencia. Los botones ◀ ▶ hacen lo mismo un lugar a la
+ * vez, que es lo único que funciona en una tablet — `dragstart` no existe al tocar. */
+
+let arrastrada = null;
+let soltada = false;
+
+contenedorSecciones.addEventListener("dragstart", (evento) => {
+  const figura = evento.target.closest?.(".pagina-diseno");
+  if (!figura) return;
+  arrastrada = figura;
+  soltada = false;
+  figura.classList.add("arrastrando");
+  evento.dataTransfer.effectAllowed = "move";
+  // Firefox no dispara `drop` si el arrastre no lleva datos, aunque no se usen.
+  evento.dataTransfer.setData("text/plain", figura.dataset.pagina);
+});
+
+contenedorSecciones.addEventListener("dragend", () => {
+  arrastrada?.classList.remove("arrastrando");
+  arrastrada = null;
+  // Soltar fuera de una tira —o apretar Escape— cancela el arrastre sin `drop`, pero
+  // `dragover` ya movió la página en pantalla. Sin repintar quedaría en un lugar que la
+  // base no tiene, y el próximo arrastre guardaría ese orden inventado.
+  if (!soltada) cargarPaginas();
+});
+
+contenedorSecciones.addEventListener("dragover", (evento) => {
+  const tira = evento.target.closest?.("[data-tira]");
+  // Cualquier sección sirve de destino, esté o no en edición: el arrastre sólo puede
+  // haber empezado en una que sí lo está, y mover una oferta a la contraportada no
+  // debería obligar a abrir las dos.
+  if (!tira || !arrastrada) return;
+  // Sin esto el navegador no considera la tira un destino válido y no hay `drop`.
+  evento.preventDefault();
+  const vecino = vecinoDespuesDe(tira, evento.clientX, evento.clientY);
+  tira.querySelector(".sin-paginas")?.remove();
+  if (vecino) tira.insertBefore(arrastrada, vecino);
+  else tira.appendChild(arrastrada);
+});
+
+/** La primera página cuyo centro queda después del cursor: delante de ella se suelta.
+ *
+ *  Se mira X e Y porque la tira envuelve en varias filas cuando hay muchas páginas, y
+ *  comparando sólo X una página de la fila de abajo parecería estar antes que una de
+ *  arriba. */
+function vecinoDespuesDe(tira, x, y) {
+  const otras = [...tira.querySelectorAll(".pagina-diseno:not(.arrastrando)")];
+  return otras.find((figura) => {
+    const caja = figura.getBoundingClientRect();
+    if (y < caja.top) return true;
+    return y <= caja.bottom && x < caja.left + caja.width / 2;
+  });
+}
+
+contenedorSecciones.addEventListener("drop", async (evento) => {
+  const tira = evento.target.closest?.("[data-tira]");
+  if (!tira || !arrastrada) return;
+  evento.preventDefault();
+  soltada = true;
+
+  const figura = arrastrada;
+  const destino = tira.dataset.tira;
+  const origen = figura.dataset.tipo;
+  figura.classList.remove("arrastrando");
+  arrastrada = null;
+
+  try {
+    // Primero el cambio de sección: mueve la página al final de la nueva, y recién
+    // después el orden la deja donde se soltó. Al revés el PATCH pisaría el arrastre.
+    if (destino !== origen) {
+      await DVU.pedir(`/catalogo/paginas/${figura.dataset.pagina}`, {
+        method: "PATCH", body: { tipo: destino },
+      });
+      figura.dataset.tipo = destino;
+      await guardarOrden(origen);
+    }
+    await guardarOrden(destino);
+    DVU.avisar(mensaje, "Orden guardado.", "ok");
+  } catch (e) {
+    DVU.avisar(mensaje, e.message, "error");
+  }
+  cargarPaginas();
+});
+
+contenedorSecciones.addEventListener("click", async (evento) => {
+  const datos = evento.target.dataset || {};
+
+  if (datos.editar) {
+    // Alternar sólo repinta: el modo no se guarda en el servidor, es de esta pantalla.
+    editando.has(datos.editar) ? editando.delete(datos.editar) : editando.add(datos.editar);
+    return cargarPaginas();
+  }
+
+  if (datos.reemplazar) {
+    selectorPagina.dataset.pagina = datos.reemplazar;
+    selectorPagina.value = "";
+    selectorPagina.click();
+    return;
+  }
+
+  if (datos.mover) {
+    const figura = evento.target.closest(".pagina-diseno");
+    const atras = Number(datos.paso) < 0;
+    const siguiente = figura.nextElementSibling;
+    // Ya está en la punta: no hay nada que mover ni que guardar.
+    if (atras ? !figura.previousElementSibling : !siguiente) return;
+    // Un lugar hacia adelante es «antes del que sigue al que sigue»; `null` lo deja al
+    // final, que es lo que corresponde cuando el que sigue ya era el último.
+    figura.parentElement.insertBefore(
+      figura, atras ? figura.previousElementSibling : siguiente.nextElementSibling
+    );
+    try {
+      await guardarOrden(figura.dataset.tipo);
+    } catch (e) {
+      DVU.avisar(mensaje, e.message, "error");
+    }
+    return cargarPaginas();
+  }
+
+  if (datos.quitar) {
+    // El mismo botón repone: si está inactiva, PATCH la vuelve a activar.
+    const inactiva = evento.target.closest(".pagina-diseno").classList.contains("inactiva");
+    try {
+      if (inactiva) {
+        await DVU.pedir(`/catalogo/paginas/${datos.quitar}`, {
+          method: "PATCH", body: { activa: true },
+        });
+        DVU.avisar(mensaje, "La página vuelve a salir en el catálogo.", "ok");
+      } else {
+        await DVU.pedir(`/catalogo/paginas/${datos.quitar}`, { method: "DELETE" });
+        DVU.avisar(mensaje, "Página quitada del catálogo. El archivo se conserva.", "ok");
+      }
+      cargarPaginas();
+    } catch (e) {
+      DVU.avisar(mensaje, e.message, "error");
+    }
+  }
+});
+
+/** Reemplaza el arte de una página sin moverla: mismo lugar, mismo id, archivo nuevo.
+ *  Es lo que se usa cuando el diseñador manda la portada corregida. */
+selectorPagina.onchange = async () => {
+  const archivo = selectorPagina.files[0];
+  const id = selectorPagina.dataset.pagina;
+  if (!archivo || !id) return;
+
+  const cuerpo = new FormData();
+  cuerpo.append("archivo", archivo);
+  try {
+    await DVU.pedir(`/catalogo/paginas/${id}/archivo`, { method: "PUT", body: cuerpo });
+    versionPagina += 1;
+    DVU.avisar(mensaje, "Archivo de la página reemplazado.", "ok");
+    cargarPaginas();
+  } catch (e) {
+    DVU.avisar(mensaje, e.message, "error");
+  }
+};
+
+contenedorSecciones.addEventListener("submit", async (evento) => {
+  const tipo = evento.target.dataset?.alta;
+  if (!tipo) return;
+  evento.preventDefault();
+
+  const formulario = evento.target;
+  const archivo = formulario.archivo.files[0];
+  if (!archivo) return;
+
+  const cuerpo = new FormData();
+  cuerpo.append("archivo", archivo);
+  cuerpo.append("tipo", tipo);
+  const boton = formulario.querySelector("button");
+  boton.disabled = true;
+  boton.textContent = "Subiendo…";
+  try {
+    await DVU.pedir("/catalogo/paginas", { method: "POST", body: cuerpo });
+    DVU.avisar(mensaje, `Página agregada a ${ROTULO[tipo].toLowerCase()}.`, "ok");
+    versionPagina += 1;
+    cargarPaginas();
+  } catch (e) {
+    DVU.avisar(mensaje, e.message, "error");
+    boton.disabled = false;
+    boton.textContent = "+ Agregar página";
+  }
+});
+
 // El árbol primero: la tabla lo necesita para pintar la lista de cada fila.
-DVU.proteger({ rol: ["admin"], alIngresar: () => cargarCategorias().then(cargar) });
+DVU.proteger({
+  rol: ["admin"],
+  alIngresar: () => cargarCategorias().then(cargar).then(cargarPaginas),
+});
 </script>
 {% endblock %}

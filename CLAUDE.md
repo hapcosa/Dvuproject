@@ -98,7 +98,9 @@ make up            # levanta el stack completo
 make down
 make logs
 make shell         # shell en el contenedor api
-make test          # pytest
+make test          # pytest rápido (sin integración; no exige cobertura)
+make test-all      # todos los tests
+make check         # lint + test-all: lo mismo que corre CI
 make lint          # ruff + mypy
 make fmt           # ruff format
 make migrate       # alembic upgrade head
@@ -134,6 +136,12 @@ make cartola-demo  # cartola de prueba para ensayar la conciliación sin agregad
   errores de parseo. No los inventes.
 - Chile: RUT con dígito verificador. Validar siempre con módulo 11, guardar normalizado
   sin puntos y con guion (`76123456-7`).
+- **Los tests borran el esquema entero** (`Base.metadata.drop_all`, al empezar y al
+  terminar). `conftest.py` le pega el sufijo `_test` a la base de `DVU_DATABASE_URL`
+  justamente por eso: sin ese sufijo, `make test-all` con el stack levantado se lleva
+  puesto el catálogo cargado sin preguntar y sin aviso —el drop es lo último que corre,
+  después de que pytest ya imprimió que todo pasó—. **Pasó.** No apuntes los tests a la
+  base del stack ni saques el sufijo. Para recuperar: `~/backups/migracion-prod/dvu.dump`.
 - El **signo `$` es una palabra suelta** que cae justo sobre la frontera
   `medida`/`precio` (centro 536.9–547.9 pt, frontera en 545.0). Clasificado por posición
   se pegaba a la medida en el 76% de los casos: 231 filas quedaron con `medida = "$"`.
@@ -141,3 +149,18 @@ make cartola-demo  # cartola de prueba para ensayar la conciliación sin agregad
   signos peso. En algunas páginas viene duplicado (`"$$"`): los regex de precio aceptan
   `\$*`, no `\$?`. Mover la frontera X no sirve — las medidas legítimas llegan a 532.3 y
   el margen es de 4 pt.
+
+## Infraestructura: dónde corre esto
+
+**Producción = `10.244.117.161`** (migrado el 2026-08-14). El host anterior
+`10.244.19.205` (`traderbot`) pasó a ser el entorno de **test**.
+
+- El repo vive en `~/servicios/Dvuproject`. Postgres y MinIO usan **volúmenes
+  Docker con nombre** (`dvu_pgdata`, `dvu_miniodata`, `dvu_redisdata`), no bind
+  mounts: para migrarlos hay que hacer `pg_dump` y un `tar` del volumen, no
+  basta con copiar un directorio.
+- **Puerto host de Postgres: `5435`**, no el 5432. En este PC el 5432 lo ocupa
+  el Postgres de signalsTrading, que volvió al puerto canónico cuando murió su
+  stack legacy. Se cambia con `POSTGRES_PORT_HOST` en el `.env`.
+- `docker-compose.override.yml` es infraestructura de la máquina y no vive en
+  el repo.

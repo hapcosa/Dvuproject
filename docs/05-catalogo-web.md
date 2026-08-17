@@ -144,6 +144,47 @@ Decisiones que sostienen eso:
 En `/admin` el filtro «— Sin categoría —» es exactamente la bandeja de revisión del
 clasificador: la lista de lo que falta asignar a mano.
 
+## La maqueta: portada, ofertas y contraportada
+
+Lo que en el catálogo es arte y no tabla. Salen del PDF original (`extraer` las recorta y
+`cargar-catalogo` las registra) y desde `/admin` se agregan, se cambian de lugar, se
+reemplazan y se quitan.
+
+El orden es en dos niveles, y la diferencia entre ellos es la decisión de fondo:
+
+1. **Entre secciones no se puede mover nada.** Portada al principio, ofertas después del
+   cuerpo, contraportada al final. Eso no es una preferencia sino lo que hace que un
+   catálogo se lea como un catálogo, y dejarlo arrastrable sólo permitiría equivocarse.
+2. **Dentro de la sección manda el administrador.** Es la columna `orden`, la que se
+   arrastra en pantalla.
+
+Hasta la migración `b7d2c4e18f30` el orden salía de `(archivo, pagina)` —de qué PDF vino
+el recorte y en qué página estaba—, que es la *procedencia* y no el *lugar*. Con dos PDF
+cargados eso intercalaba las dos portadas con las ofertas del primero y no había forma de
+arreglarlo desde la web: mover `pagina` habría mentido sobre de dónde salió el recorte.
+
+El criterio vive en `dvu/db/maqueta.py` y no repetido en cada consumidor. Son tres —la
+pantalla de administración, el catálogo web y el exportador— y si se desincronizan el
+administrador ve un orden y el PDF sale con otro.
+
+Decisiones:
+
+- **Se arrastra, y también hay flechas ◀ ▶.** El arrastre nativo del navegador no existe
+  al tocar: sin las flechas la pantalla no se puede usar en una tablet.
+- **El orden se manda entero en cada movimiento**, no «esta página subió tres lugares».
+  Es lo único que no depende de qué había antes en la base, y por lo tanto lo único que
+  no se desincroniza si dos pestañas mueven cosas a la vez. Los ids que ya no existen se
+  ignoran en vez de fallar.
+- **Cambiar de sección manda la página al final de la nueva.** Su posición anterior era
+  del orden de la otra sección y ahí no significa nada.
+- **Reemplazar el archivo conserva el lugar y el id.** Es el caso del diseñador que manda
+  la portada corregida: si hubiera que borrar y volver a subir, habría que reacomodarla.
+  Los objetos viejos **no se borran** del almacén — el PDF que se exportó ayer todavía los
+  referencia.
+- **Quitar no borra.** Una oferta que sale en agosto suele volver; «Reponer» la devuelve.
+- **El modo edición es de la pantalla, no del servidor.** No hay estado que quede colgado
+  si alguien cierra la pestaña a la mitad.
+
 ## Volver a PDF
 
 El catálogo web se exporta a PDF con el diseño del impreso, desde los dos botones del
@@ -175,6 +216,20 @@ Decisiones:
 
 - **El filtro de la pantalla viaja al PDF.** Lo que el vendedor ve es lo que se lleva:
   «Gasfitería» son 2 páginas, no 142.
+- **Filtrado salen las tapas pero no las hojas de oferta.** Las ofertas son del catálogo
+  completo: pegadas detrás de una lista de gasfitería son decenas de MB de páginas que no
+  responden lo que se preguntó. La portada y la contraportada sí van, porque son la
+  identidad del documento.
+- **Una búsqueda sin resultados responde 404, no un PDF.** Con las páginas de arte
+  pegadas ese archivo pesa decenas de MB y no tiene ni una fila: el vendedor lo baja, lo
+  abre y recién ahí se entera de que su búsqueda no encontró nada.
+- **Lo baja el navegador, no `fetch`.** Un archivo de decenas de MB traído por `fetch`
+  hay que tenerlo entero en memoria antes de poder escribir un solo byte a disco, sin
+  barra de progreso y sin forma de cancelar; en un celular eso se queda pegado o se cae.
+  La página pide un token corto (`POST /auth/descarga`, dos minutos, sólo lectura) y
+  navega a la URL con él en la query, que es la vía por la que el navegador sabe bajar
+  archivos grandes desde siempre. Va en la query porque al navegar no hay dónde poner el
+  `Authorization`, y por eso es de un tipo aparte: el token de sesión **no** sirve ahí.
 - **Sin fotos se saca la columna «Imagen»**, no se deja en blanco. Una columna vacía a lo
   largo de 51 páginas no informa nada y le roba ancho a la descripción.
 - **Una foto faltante o corrupta no tumba el catálogo.** Se verifica al bajarla, antes de
@@ -191,18 +246,84 @@ Decisiones:
 
 ## El pedido desde el catálogo
 
-`/pedido` reemplaza el mensaje de WhatsApp con el pedido: busca en el catálogo (por
-texto o por categoría), arma el carrito, elige el cliente de su cartera y envía.
+`/pedido` reemplaza el mensaje de WhatsApp con el pedido: se abre una lista para una
+ferretería, se busca en el catálogo, se agrega, y al final se envía.
+
+El supuesto que hay que tener a la vista es cómo se arma un pedido de verdad: **el
+ferretero dicta**. Canta treinta productos seguidos mientras atiende el mesón, y cada
+roce por producto se multiplica por treinta. La otra mitad del supuesto es que la mañana
+del vendedor son cinco ferreterías, no una: el pedido se interrumpe, se retoma, y a veces
+se termina en otro equipo.
+
+### Las listas viven en el servidor
+
+Una lista a medias es un pedido en estado `borrador` (`/pedidos/borradores`), no algo
+guardado en el navegador. Antes el carrito estaba en `sessionStorage` y cerrar la pestaña
+—o que se apague el celular— era perder el trabajo con el cliente al lado.
+
+- **Un borrador no es un pedido.** No tiene folio, no aparece en `GET /pedidos`, no entra
+  al Excel de ventas y no se puede facturar. `numero` es nulo hasta que se envía
+  (migración `c8f1a6b34d92`): darle folio al crearlo quemaría un número de la secuencia
+  por cada lista que nunca se manda, y eso se ve después como huecos en la correlatividad
+  que alguien tiene que explicar.
+- **Guardar es permisivo; enviar es estricto.** El borrador acepta una cantidad que no es
+  múltiplo del envase y la deja marcada. Rechazar el guardado obligaría a arreglarla con
+  el cliente esperando, o a perderla. Al enviar sí se valida todo.
+- **Se manda la lista entera en cada guardado**, no «esta línea cambió»: es lo único que
+  no depende de qué había antes, y por lo tanto lo único que no se desincroniza si la
+  misma lista está abierta en el celular y en el computador.
+- **Al enviar se vuelven a leer los precios del catálogo.** El precio que vale es el del
+  momento en que se hace el pedido, no el de cuando se abrió la lista, que pueden ser días
+  distintos. Recién ahí se congela.
+- **Descartar no borra.** La lista queda `anulado` con su motivo, como todo acá.
+- Las listas son **del vendedor** que las arma. Un usuario con rol `cliente` no tiene a
+  quién atribuírselas —`vendedor_id` queda nulo y no hay vínculo usuario↔cliente— así que
+  esa página arma una sola lista en el navegador y la manda con `POST /pedidos`.
+
+### Bajar el costo de cada producto
+
+- **Se busca mientras se escribe** y con <kbd>Enter</kbd> se agrega cuando queda un solo
+  resultado, que es lo que pasa al tipear un código de proveedor. Un botón «Buscar» son
+  dos toques más por producto.
+- **La fila del buscador dice cuánto de eso ya lleva la lista.** Sumar en silencio es cómo
+  se agrega dos veces el mismo codo sin notarlo.
+- **Miniatura del producto**, botones `−` / `+` grandes —esto se usa de pie— y una barra
+  fija abajo con el total, porque mientras se busca la lista queda fuera de pantalla y
+  «¿cuánto llevamos?» es una pregunta del cliente, no del sistema.
+- **«Repetir»** sobre un pedido anterior arma una lista nueva con las mismas líneas. La
+  ferretería pide casi siempre lo mismo; volver a buscar treinta productos es media
+  visita. Si el envase cambió de tamaño desde entonces, la línea queda marcada y el
+  vendedor decide: corregirla sola sería cambiarle el pedido al cliente sin decirle.
+- **El cliente se elige escribiendo**, no de un desplegable de doscientas ferreterías.
+
+### El dinero lo calcula el servidor
 
 - Las cantidades se escriben **en envases**, no en unidades. El vendedor pone «2 cajas» y
   la página envía `2 × multiplo_venta`: la cantidad es múltiplo válido por construcción y
   no hay forma de tipear un número que el backend vaya a rechazar.
-- El carrito vive en `sessionStorage` con un `client_uuid` que **no se regenera entre
-  intentos** —sólo tras un envío exitoso o al vaciarlo—. Si se corta la señal al enviar,
+- La página **no calcula IVA**. `POST /pedidos/cotizar` devuelve neto, IVA, total y el
+  precio de hoy de cada línea sin crear nada, y se llama en cada cambio. Así el vendedor
+  puede responder «¿en cuánto me queda?» antes de cerrar, la regla del impuesto sigue
+  viviendo en un solo lugar, y los múltiplos malos se ven mientras se arma la lista y no
+  en el 422 del envío. Cotizar **no falla** por una línea mala: la marca y sigue.
+- El `client_uuid` **no se regenera entre intentos**. Si se corta la señal al enviar,
   reintentar cae en la idempotencia del backend en vez de duplicar el pedido. Es el mismo
   contrato que después va a usar la app Flutter offline-first.
-- La página **no calcula IVA**: muestra la suma neta y después los totales que devolvió
-  el servidor. La regla del impuesto vive en un solo lugar y esta página no la repite.
+- **Enviar pide confirmación** con el resumen, y después ofrece **mandarlo por WhatsApp**:
+  el pedido va a seguir viajando por ahí mientras el cliente no entre a la web, y copiarlo
+  a mano es el paso donde el vendedor abandona la herramienta.
+
+### Lo que ya se envió
+
+El folio en «Mis últimos pedidos» abre el detalle: las líneas como quedaron, los totales
+y la **bitácora de estados**. Es la respuesta a «¿en qué va lo mío?», que hoy la da
+alguien mirando el Excel. Los estados se muestran en palabras —«Enviado a DVU»,
+«Preparándose en bodega»— y no con el nombre de la máquina de estados; las etiquetas
+viven en `dvu.domain.pedido.ETIQUETAS`, no repartidas por las plantillas.
+
+Y cuando el backend rechaza líneas —el 422 de múltiplos, que llega con **todas** las
+malas de una vez— se marcan donde están, con el botón para dejar la cantidad vendible al
+lado. Un párrafo de texto obliga a buscarlas a ojo en una lista de treinta.
 
 ## Cómo probarlo
 
@@ -218,9 +339,10 @@ Después, en <http://localhost:8000>:
 1. `/` — busca «codo» o pega un código de proveedor (`PR/49573`, `KM521`), o filtrá por
    categoría en el desplegable. Con sesión iniciada, «↓ PDF» baja lo que estás viendo
    con el diseño del impreso, y «↓ Lista de precios» lo mismo sin fotos.
-2. `/pedido` — entra como `vendedor@dvu.cl` / `dvu-dev-1234`, filtra por «Gasfitería»,
-   agrega dos envases de un codo, elige el cliente y envía. Probá recargar la página
-   antes de enviar: el carrito sigue ahí.
+2. `/pedido` — entra como `vendedor@dvu.cl` / `dvu-dev-1234`, empieza una lista para una
+   ferretería, escribe «codo» y agrega dos envases. Probá **cerrar la pestaña** antes de
+   enviar y volver a entrar: la lista sigue en «Mis listas», porque vive en el servidor.
+   Envíalo y después apretá «Repetir» sobre el pedido: arma la misma lista de nuevo.
 3. `/vendedor` — escribe un mensaje como se lo mandarías al grupo: *«Ferretería El
    Martillo, abono factura 33780 por 510.459, BCI op 12345678»*. El monto y la factura
    salen solos del texto.

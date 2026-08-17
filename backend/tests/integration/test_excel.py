@@ -180,6 +180,16 @@ def test_pedido_anulado_no_aparece_pero_sigue_en_la_base(
     assert sesion.get(Pedido, venta["pedido"].id) is not None
 
 
+def test_una_lista_a_medias_no_es_una_venta(sesion: Session, venta: dict[str, Any]) -> None:
+    """El borrador del vendedor no tiene folio y nadie lo pidió: sumarlo sería contar humo."""
+    venta["pedido"].estado = "borrador"
+    venta["pedido"].numero = None
+    sesion.flush()
+
+    hoja = _abrir(exportar_excel(sesion))["Ventas"]
+    assert hoja.max_row == 1
+
+
 def test_el_rango_de_fechas_filtra_los_pagos(sesion: Session, venta: dict[str, Any]) -> None:
     hoja = _abrir(exportar_excel(sesion, desde=date(2026, 8, 2)))["Pagos"]
     filas = [[c.value for c in f] for f in hoja.iter_rows(min_row=2, max_row=2)]

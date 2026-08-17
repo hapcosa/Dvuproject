@@ -28,6 +28,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from dvu.db.models import Pago, PagoAplicacion, Pedido
+from dvu.domain.pedido import EstadoPedido
 
 FORMATO_CLP = "#,##0"
 FORMATO_FECHA = "dd-mm-yyyy"
@@ -102,8 +103,10 @@ def _pedidos(session: Session, desde: date | None, hasta: date | None) -> list[P
         selectinload(Pedido.vendedor),
     )
     # Los pedidos anulados quedan fuera del Excel de ventas, pero siguen en la base:
-    # la planilla es un reporte, no la fuente de verdad.
-    consulta = consulta.where(Pedido.estado != "anulado")
+    # la planilla es un reporte, no la fuente de verdad. Los borradores tampoco van:
+    # son la lista que el vendedor todavía está armando con el cliente al lado, no
+    # tienen folio y nadie los pidió — sumarlos a las ventas sería contar humo.
+    consulta = consulta.where(Pedido.estado.notin_(("anulado", EstadoPedido.BORRADOR.value)))
     if desde is not None:
         consulta = consulta.where(Pedido.creado_en >= desde)
     if hasta is not None:
@@ -221,7 +224,9 @@ def _hoja_pagos(libro: Workbook, pagos: Sequence[Pago]) -> None:
                 pago.referencia,
                 _entero(pago.monto_clp),
                 pago.estado,
-                ", ".join(a.pedido.numero for a in pago.aplicaciones),
+                # Sin folio no hay a qué aplicar un pago, así que la guarda no descarta
+                # nada real: es para el tipo, que admite nulo por los borradores.
+                ", ".join(a.pedido.numero for a in pago.aplicaciones if a.pedido.numero),
                 _entero(pago.monto_clp) - aplicado,
             ]
         )

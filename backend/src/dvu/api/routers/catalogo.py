@@ -5,32 +5,56 @@ roja del encabezado —la del logo DVU— y las páginas de arte (portada, ofert
 contraportada). Las extrae Fase 0 (`extractor/plantilla.py`) y las carga
 `cargar-catalogo`; acá sólo se sirven.
 
-Todo va por redirección a URL firmada y no por URL directa: el bucket es uno solo y no se
-abre al público por comodidad, la misma política que las fotos de producto.
+El bucket no se abre al público: el contenido sale por la API, la misma política que las
+fotos de producto. Ver `dvu.api.objetos` para por qué no va por URL firmada.
 """
 
 from __future__ import annotations
 
+import uuid as uuid_lib
+from io import BytesIO
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.responses import RedirectResponse
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Response, UploadFile, status
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from dvu.almacenamiento import Almacen, get_almacen
-from dvu.db.models import CatalogoActivo, CatalogoPagina
+from dvu.almacenamiento import (
+    TAMANO_MAXIMO_BYTES,
+    Almacen,
+    ArchivoDemasiadoGrande,
+    TipoNoPermitido,
+    get_almacen,
+)
+from dvu.api.deps import exige_rol
+from dvu.api.objetos import responder_objeto
+from dvu.db import maqueta
+from dvu.db.models import CatalogoActivo, CatalogoPagina, Usuario
 from dvu.db.session import get_session
+from dvu.extractor.pagina_subida import PaginaIlegible, convertir
 from dvu.extractor.plantilla import logo_a_la_izquierda
 
 router = APIRouter(prefix="/catalogo", tags=["catálogo"])
 
 SessionDep = Annotated[Session, Depends(get_session)]
 AlmacenDep = Annotated[Almacen, Depends(get_almacen)]
+AdminDep = Annotated[Usuario, Depends(exige_rol("admin"))]
 
 #: La banda se espeja según la página sea par o impar, como en cualquier pliego impreso.
 CLAVES_BANNER = {"par": "banner_par", "impar": "banner_impar"}
+
+#: Los mismos tres que acepta la restricción de la tabla.
+TIPOS_PAGINA = frozenset(maqueta.SECCIONES)
+
+#: Se acepta el PDF —que es lo que conserva el vector— y las imágenes que un diseñador
+#: entrega de vuelta. De cualquiera de las dos se deriva la otra mitad del par.
+TIPOS_PAGINA_SUBIDA = frozenset({"application/pdf", "image/jpeg", "image/png", "image/webp"})
+
+#: Las páginas que carga el administrador van bajo su propio «archivo». El listado
+#: ordena por (archivo, página), así que quedan agrupadas y después de las que salieron
+#: del PDF original, dentro del bloque que les toque por tipo.
+ARCHIVO_SUBIDA = "subidas-admin"
 
 
 class BandaOut(BaseModel):
@@ -53,6 +77,24 @@ class PaginaDisenoOut(BaseModel):
     pagina: int
     #: `portada`, `promocion` o `contraportada`.
     tipo: str
+    #: Posición dentro de su sección. Ver `dvu.db.maqueta`.
+    orden: int
+    activa: bool
+
+
+class PaginaDisenoPatch(BaseModel):
+    """Sólo lo que el administrador puede mover de una página ya cargada."""
+
+    tipo: str | None = None
+    pagina: int | None = None
+    orden: int | None = None
+    activa: bool | None = None
+
+
+class OrdenPaginas(BaseModel):
+    """Los ids de una sección en el orden nuevo, tal como quedaron en pantalla."""
+
+    ids: list[int]
 
 
 @router.get("/bandas", response_model=list[BandaOut])
@@ -71,28 +113,197 @@ def bandas(session: SessionDep, almacen: AlmacenDep) -> list[BandaOut]:
 
 
 @router.get("/paginas", response_model=list[PaginaDisenoOut])
-def paginas(session: SessionDep) -> list[CatalogoPagina]:
-    """Las páginas de arte del catálogo, en el orden en que están impresas."""
-    return list(
-        session.scalars(
-            select(CatalogoPagina)
-            .where(CatalogoPagina.activa.is_(True))
-            .order_by(CatalogoPagina.archivo, CatalogoPagina.pagina)
-        )
+def paginas(session: SessionDep, incluir_inactivas: bool = False) -> list[CatalogoPagina]:
+    """Las páginas de arte del catálogo, en el orden en que están impresas.
+
+    `incluir_inactivas` es para la pantalla de administración: ahí hay que ver las que se
+    sacaron para poder volver a ponerlas. El catálogo público llama sin el parámetro.
+    """
+    return maqueta.paginas(session, incluir_inactivas=incluir_inactivas)
+
+
+@router.post("/paginas", response_model=PaginaDisenoOut, status_code=status.HTTP_201_CREATED)
+async def agregar_pagina(
+    session: SessionDep,
+    almacen: AlmacenDep,
+    usuario: AdminDep,
+    archivo: Annotated[UploadFile, File()],
+    tipo: Annotated[str, Form()],
+    pagina: Annotated[int | None, Form()] = None,
+) -> CatalogoPagina:
+    """Agrega una portada, una página de oferta o una contraportada.
+
+    Se guarda el par PDF/PNG: el PDF es el que se reinserta al exportar el catálogo y el
+    PNG el que ve la web. Da lo mismo cuál de los dos se suba, la otra mitad se deriva.
+    """
+    _validar_tipo(tipo)
+    key_pdf, key_png = await _guardar_par(archivo, almacen)
+
+    registro = CatalogoPagina(
+        archivo=ARCHIVO_SUBIDA,
+        pagina=pagina if pagina is not None else _siguiente_pagina(session),
+        tipo=tipo,
+        orden=maqueta.siguiente_orden(session, tipo),
+        key_pdf=key_pdf,
+        key_png=key_png,
     )
+    session.add(registro)
+    session.commit()
+    session.refresh(registro)
+    return registro
+
+
+@router.put("/paginas/{pagina_id}/archivo", response_model=PaginaDisenoOut)
+async def reemplazar_archivo(
+    pagina_id: int,
+    session: SessionDep,
+    almacen: AlmacenDep,
+    usuario: AdminDep,
+    archivo: Annotated[UploadFile, File()],
+) -> CatalogoPagina:
+    """Cambia el arte de una página que ya está en la maqueta, sin moverla de lugar.
+
+    Es lo que se usa cuando el diseñador manda la portada corregida: la posición, la
+    sección y el id se conservan, así que no hay que volver a acomodarla. Los objetos
+    viejos quedan en el almacén —no se borran— porque el PDF que se exportó ayer todavía
+    los referencia.
+    """
+    registro = _buscar_pagina(session, pagina_id)
+    registro.key_pdf, registro.key_png = await _guardar_par(archivo, almacen)
+    session.commit()
+    session.refresh(registro)
+    return registro
+
+
+@router.put("/paginas/orden", response_model=list[PaginaDisenoOut])
+def reordenar_paginas(
+    orden: OrdenPaginas, session: SessionDep, usuario: AdminDep
+) -> list[CatalogoPagina]:
+    """Guarda el orden de una sección después de arrastrar.
+
+    Llega la sección entera y no «la página 3 pasó a la 1»: reescribir la lista completa
+    es lo único que no depende de qué había antes, y por lo tanto lo único que no se
+    desincroniza si dos pestañas mueven cosas a la vez. Los ids que no existen se
+    ignoran.
+    """
+    tocadas = maqueta.renumerar(session, orden.ids)
+    session.commit()
+    return tocadas
+
+
+@router.patch("/paginas/{pagina_id}", response_model=PaginaDisenoOut)
+def actualizar_pagina(
+    pagina_id: int, cambios: PaginaDisenoPatch, session: SessionDep, usuario: AdminDep
+) -> CatalogoPagina:
+    """Cambia la sección, la posición o si la página sale en el catálogo."""
+    registro = _buscar_pagina(session, pagina_id)
+    if cambios.tipo is not None and cambios.tipo != registro.tipo:
+        _validar_tipo(cambios.tipo)
+        registro.tipo = cambios.tipo
+        # Cambiar de sección la manda al final de la nueva: el `orden` que traía era una
+        # posición de la sección anterior y acá no significa nada. Si `orden` viene en el
+        # mismo PATCH —el arrastre entre secciones lo manda— pisa esto y queda donde se
+        # soltó.
+        registro.orden = maqueta.siguiente_orden(session, cambios.tipo)
+    if cambios.pagina is not None:
+        registro.pagina = cambios.pagina
+    if cambios.orden is not None:
+        registro.orden = cambios.orden
+    if cambios.activa is not None:
+        registro.activa = cambios.activa
+    session.commit()
+    session.refresh(registro)
+    return registro
+
+
+@router.delete("/paginas/{pagina_id}", response_model=PaginaDisenoOut)
+def quitar_pagina(pagina_id: int, session: SessionDep, usuario: AdminDep) -> CatalogoPagina:
+    """Saca la página del catálogo sin borrarla.
+
+    No se borra el registro ni el objeto del bucket: una oferta que se saca en agosto
+    suele volver, y el PDF exportado el mes pasado sigue haciendo referencia a ella.
+    Volver a ponerla es `PATCH` con `activa: true`.
+    """
+    registro = _buscar_pagina(session, pagina_id)
+    registro.activa = False
+    session.commit()
+    session.refresh(registro)
+    return registro
+
+
+def _validar_tipo(tipo: str) -> None:
+    if tipo not in TIPOS_PAGINA:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"El tipo es uno de: {', '.join(sorted(TIPOS_PAGINA))}",
+        )
+
+
+async def _guardar_par(archivo: UploadFile, almacen: Almacen) -> tuple[str, str]:
+    """Deja el par PDF/PNG en el almacén y devuelve sus dos keys.
+
+    El PDF es el que se reinserta al exportar el catálogo y el PNG el que ve la web. Da
+    lo mismo cuál de los dos se suba, la otra mitad se deriva.
+    """
+    if archivo.content_type not in TIPOS_PAGINA_SUBIDA:
+        raise HTTPException(
+            status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail=str(
+                TipoNoPermitido(
+                    f"Tipo '{archivo.content_type}' no permitido para una página; se aceptan: "
+                    + ", ".join(sorted(TIPOS_PAGINA_SUBIDA))
+                )
+            ),
+        )
+
+    datos = await archivo.read()
+    if len(datos) > TAMANO_MAXIMO_BYTES:
+        raise HTTPException(
+            status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=str(ArchivoDemasiadoGrande(f"La página pesa {len(datos)} bytes")),
+        )
+    try:
+        pdf, png = convertir(datos, archivo.content_type or "")
+    except PaginaIlegible as exc:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY, detail=f"No se pudo leer la página: {exc}"
+        ) from exc
+
+    # La key lleva un uuid y no el nombre del archivo: dos portadas distintas pueden
+    # llegar con el mismo nombre desde el computador del diseñador.
+    base = f"catalogo/paginas/{uuid_lib.uuid4()}"
+    almacen.guardar(f"{base}.pdf", BytesIO(pdf), "application/pdf")
+    almacen.guardar(f"{base}.png", BytesIO(png), "image/png")
+    return f"{base}.pdf", f"{base}.png"
+
+
+def _buscar_pagina(session: Session, pagina_id: int) -> CatalogoPagina:
+    registro = session.get(CatalogoPagina, pagina_id)
+    if registro is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="No existe esa página")
+    return registro
+
+
+def _siguiente_pagina(session: Session) -> int:
+    """La posición que sigue entre las subidas a mano, para no chocar con la restricción
+    de unicidad (`archivo`, `pagina`) ni obligar al administrador a llevar la cuenta."""
+    ultima = session.scalar(
+        select(func.max(CatalogoPagina.pagina)).where(CatalogoPagina.archivo == ARCHIVO_SUBIDA)
+    )
+    return (ultima or 0) + 1
 
 
 @router.get("/paginas/{pagina_id}/imagen")
-def imagen_de_pagina(pagina_id: int, session: SessionDep, almacen: AlmacenDep) -> RedirectResponse:
+def imagen_de_pagina(pagina_id: int, session: SessionDep, almacen: AlmacenDep) -> Response:
     """La vista previa en PNG. Para ver la página en la web sin bajarse el PDF."""
     pagina = session.get(CatalogoPagina, pagina_id)
     if pagina is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="No existe esa página")
-    return RedirectResponse(almacen.url_firmada(pagina.key_png), status_code=307)
+    return responder_objeto(almacen, pagina.key_png)
 
 
 @router.get("/banner/{paridad}")
-def banner(paridad: str, session: SessionDep, almacen: AlmacenDep) -> RedirectResponse:
+def banner(paridad: str, session: SessionDep, almacen: AlmacenDep) -> Response:
     """La banda del encabezado, `par` o `impar`."""
     clave = CLAVES_BANNER.get(paridad)
     if clave is None:
@@ -101,4 +312,4 @@ def banner(paridad: str, session: SessionDep, almacen: AlmacenDep) -> RedirectRe
     if activo is None:
         # Pasa antes de la primera extracción de plantilla. La web dibuja la suya y sigue.
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Todavía no hay banda cargada")
-    return RedirectResponse(almacen.url_firmada(activo.key_objeto), status_code=307)
+    return responder_objeto(almacen, activo.key_objeto)

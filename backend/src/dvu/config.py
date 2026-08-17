@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import Field, field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 Entorno = Literal["development", "test", "staging", "production"]
 
@@ -28,13 +28,20 @@ class Settings(BaseSettings):
 
     # --- api ---
     api_prefix: str = "/api/v1"
-    cors_origins: list[str] = Field(default_factory=list)
+    #: `NoDecode` desactiva el parseo JSON que pydantic-settings aplica por defecto a
+    #: los tipos complejos. Sin esto, el valor separado por comas del .env explota en
+    #: el source (SettingsError) antes de que corra `_split_csv`.
+    cors_origins: Annotated[list[str], NoDecode] = Field(default_factory=list)
 
     # --- seguridad ---
     secret_key: str = "cambiame-openssl-rand-hex-32"  # noqa: S105 — placeholder, no un secreto
     jwt_algorithm: str = "HS256"
     access_token_minutes: int = 60
     refresh_token_days: int = 30
+    #: Vida del token de descarga que viaja en la URL. Es corto a propósito: la URL queda
+    #: en el historial del navegador y en el log del proxy, así que sirve para bajar el
+    #: archivo y nada más. Dos minutos alcanzan de sobra — el catálogo entero tarda ~10 s.
+    descarga_token_minutes: int = 2
 
     # --- infraestructura ---
     database_url: str = "postgresql+psycopg://dvu:dvu@localhost:5432/dvu"

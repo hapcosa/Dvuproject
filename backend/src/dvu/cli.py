@@ -12,7 +12,7 @@ import typer
 from dvu.almacenamiento import get_almacen
 from dvu.carga.cartola import cartola_de_prueba
 from dvu.carga.catalogo import cargar_catalogo
-from dvu.carga.catalogo_impreso import exportar_catalogo_pdf
+from dvu.carga.catalogo_impreso import CatalogoVacio, exportar_catalogo_pdf
 from dvu.carga.categorias import clasificar_catalogo
 from dvu.carga.excel import exportar_excel
 from dvu.carga.seed import SeedEnProduccion, sembrar
@@ -127,9 +127,7 @@ def _extraer_plantilla(
             filas_por_pagina.setdefault(fila.pagina, []).append((fila.orden, fila.y_centro))
         marcas = asociar_marcas_a_filas(logos, filas_por_pagina)
 
-        paginas = extraer_paginas_diseno(
-            pdf, dir_plantilla, con_filas, hasta_pagina=hasta_pagina
-        )
+        paginas = extraer_paginas_diseno(pdf, dir_plantilla, con_filas, hasta_pagina=hasta_pagina)
 
         salida[pdf.name] = {
             "banners": banners,
@@ -274,9 +272,13 @@ def catalogo_pdf_cmd(
     sufijo = f"-{categoria}" if categoria else ""
     destino = salida or Path(f"catalogo-dvu{sufijo}-{datetime.now(UTC):%Y%m%d}.pdf")
     with get_sessionmaker()() as session:
-        contenido = exportar_catalogo_pdf(
-            session, get_almacen(), categoria=categoria, con_imagenes=not sin_imagenes
-        )
+        try:
+            contenido = exportar_catalogo_pdf(
+                session, get_almacen(), categoria=categoria, con_imagenes=not sin_imagenes
+            )
+        except CatalogoVacio as exc:
+            typer.echo(f"No hay nada que exportar: {exc}", err=True)
+            raise typer.Exit(1) from exc
     destino.write_bytes(contenido)
     typer.echo(f"PDF escrito en {destino} ({len(contenido) // 1024} KB)")
 

@@ -63,16 +63,22 @@ fmt: ## Formatea y autocorrige
 	$(COMPOSE) run --rm --no-deps api ruff check --fix src tests
 	$(COMPOSE) run --rm --no-deps api ruff format src tests
 
+# El umbral de cobertura (`fail_under` en pyproject) se mide sobre la suite entera:
+# los routers y la carga los cubren los tests de integración. Exigirlo acá, donde
+# justamente no corren, es una alarma que siempre suena y que nadie puede apagar.
 .PHONY: test
-test: ## Tests (sin los marcados integration)
-	$(COMPOSE) run --rm api pytest -m "not integration"
+test: ## Tests rápidos, sin los marcados integration (no exige cobertura)
+	$(COMPOSE) run --rm api pytest -m "not integration" --cov-fail-under=0
 
 .PHONY: test-all
 test-all: ## Todos los tests, incluidos los de integración
 	$(COMPOSE) run --rm api pytest
 
+# `test-all` y no `test`: CI corre `pytest -m "not pdf"` contra Postgres y Redis, o sea
+# con los de integración. Acá van además los marcados `pdf`, que se saltan solos si el
+# catálogo no está bajado.
 .PHONY: check
-check: lint test ## Lo mismo que corre CI
+check: lint test-all ## Lo mismo que corre CI
 
 # --- base de datos -----------------------------------------------------------
 .PHONY: migrate

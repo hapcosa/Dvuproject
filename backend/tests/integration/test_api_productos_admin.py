@@ -239,7 +239,8 @@ def test_subir_la_foto_del_producto(
     assert r.json()["imagen_key"] == "catalogo/DVU-PR49573.png"
 
     vista = cliente_api_local.get(f"{PREFIJO}/productos/DVU-PR49573/imagen", follow_redirects=False)
-    assert vista.status_code == 307
+    assert vista.status_code == 200
+    assert vista.content == b"\x89PNG datos de imagen"
 
 
 def test_resubir_la_foto_pisa_la_anterior(
