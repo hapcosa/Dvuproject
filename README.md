@@ -237,9 +237,9 @@ los totales que devolvió el servidor, porque la regla del impuesto vive en un s
 ## Desarrollo
 
 ```bash
-make check     # ruff check + ruff format --check + mypy   (lo mismo que corre CI)
-make test      # pytest, sin los tests que necesitan los PDF
-make test-all  # incluye los tests marcados `pdf`
+make check     # ruff + mypy + toda la suite   (lo mismo que corre CI)
+make test      # pytest rápido: sin los tests de integración, y sin exigir cobertura
+make test-all  # todos, incluidos los de integración y los marcados `pdf`
 make fmt
 make logs
 make shell

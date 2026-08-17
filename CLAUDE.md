@@ -98,7 +98,9 @@ make up            # levanta el stack completo
 make down
 make logs
 make shell         # shell en el contenedor api
-make test          # pytest
+make test          # pytest rápido (sin integración; no exige cobertura)
+make test-all      # todos los tests
+make check         # lint + test-all: lo mismo que corre CI
 make lint          # ruff + mypy
 make fmt           # ruff format
 make migrate       # alembic upgrade head
