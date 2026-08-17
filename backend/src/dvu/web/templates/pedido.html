@@ -138,6 +138,17 @@
   </div>
 </div>
 
+<!-- El pedido enviado, como quedó. Es lo que el vendedor abre cuando el ferretero
+     pregunta «¿en qué va lo mío?» o «¿qué te pedí la otra vez?». -->
+<dialog class="ficha" id="ficha-pedido">
+  <header>
+    <h2 id="pedido-titulo"></h2>
+    <button class="cerrar" id="pedido-cerrar" aria-label="Cerrar">×</button>
+  </header>
+  <div class="cuerpo ancho" id="pedido-cuerpo"></div>
+  <p class="pie" id="pedido-pie"></p>
+</dialog>
+
 <dialog id="confirmar" class="confirmacion">
   <h3>¿Enviamos el pedido?</h3>
   <div id="confirmar-cuerpo"></div>
@@ -591,6 +602,20 @@ function resumenWhatsapp(pedido) {
   );
 }
 
+/** Pinta en la lista lo que el backend rechazó, línea por línea. */
+function marcarProblemas(detalle) {
+  let cuantas = 0;
+  for (const problema of detalle) {
+    const linea = cotizado.get(problema.sku);
+    if (!linea) continue;
+    linea.problema = problema.error;
+    linea.cantidad_sugerida = problema.cantidad_sugerida ?? null;
+    cuantas += 1;
+  }
+  totales = { ...totales, con_problema: cuantas };
+  dibujarLineas();
+}
+
 async function enviar() {
   if (!lista?.lineas.length) return DVU.avisar(mensaje, "La lista no tiene líneas.", "error");
   if (totales.con_problema) {
@@ -641,6 +666,10 @@ $("confirmar-si").onclick = async () => {
     cerrar();
     cargarMios();
   } catch (e) {
+    // El 422 de múltiplos trae todas las líneas malas de una vez. Se marcan donde
+    // están, con el arreglo a mano: un párrafo de texto obliga a buscarlas a ojo en
+    // una lista de treinta.
+    if (Array.isArray(e.detalle)) marcarProblemas(e.detalle);
     DVU.avisar(mensaje, e.message, "error");
   } finally {
     boton.disabled = false;
@@ -779,7 +808,8 @@ async function cargarMios() {
           .map(
             (p) => `
         <tr>
-          <td><code>${DVU.escapar(p.numero)}</code></td>
+          <td><button type="button" class="plano ver" data-numero="${DVU.escapar(p.numero)}"
+                ><code>${DVU.escapar(p.numero)}</code></button></td>
           <td>${DVU.escapar(p.cliente_razon_social || p.cliente_rut)}</td>
           <td class="numero">${p.lineas.length}</td>
           <td class="numero">${DVU.pesos(p.total_clp)}</td>
@@ -797,9 +827,74 @@ async function cargarMios() {
   }
 }
 
+/* --- el pedido enviado, en detalle ---------------------------------------- */
+
+/** Lo abre desde «mis últimos pedidos». Trae la bitácora, que es la respuesta a «¿en
+ *  qué va lo mío?» —hoy esa pregunta la contesta alguien mirando el Excel—. */
+async function verPedido(numero) {
+  try {
+    const p = await DVU.pedir(`/pedidos/${encodeURIComponent(numero)}`);
+    $("pedido-titulo").textContent = `${p.numero} · ${p.cliente_razon_social}`;
+    $("pedido-cuerpo").innerHTML = `
+      <p><span class="pastilla puesta">${DVU.escapar(p.estado_etiqueta)}</span>
+         ${p.sincronizado_en ? " · enviado el " + new Date(p.sincronizado_en).toLocaleString("es-CL") : ""}</p>
+      ${p.observaciones ? `<p class="pista">“${DVU.escapar(p.observaciones)}”</p>` : ""}
+      <table class="datos">
+        <thead><tr>
+          <th>Producto</th><th class="numero">Envases</th><th class="numero">Unidades</th>
+          <th class="numero">Precio unit.</th><th class="numero">Total</th>
+        </tr></thead>
+        <tbody>${p.lineas
+          .map(
+            (l) => `<tr>
+              <td>${DVU.escapar(l.descripcion)}</td>
+              <td class="numero">${l.cantidad / l.multiplo_venta}</td>
+              <td class="numero">${l.cantidad.toLocaleString("es-CL")}</td>
+              <td class="numero">${DVU.pesos(l.precio_unitario_clp)}</td>
+              <td class="numero">${DVU.pesos(l.total_linea_clp)}</td>
+            </tr>`
+          )
+          .join("")}</tbody>
+        <tfoot>
+          <tr><th colspan="4" class="numero">Neto</th>
+              <th class="numero">${DVU.pesos(p.neto_clp)}</th></tr>
+          <tr><th colspan="4" class="numero">IVA</th>
+              <th class="numero">${DVU.pesos(p.iva_clp)}</th></tr>
+          <tr class="total"><th colspan="4" class="numero">Total</th>
+              <th class="numero">${DVU.pesos(p.total_clp)}</th></tr>
+        </tfoot>
+      </table>
+      <h4>Cómo va</h4>
+      <ol class="bitacora">${p.eventos
+        .map(
+          (e) => `<li><strong>${DVU.escapar(e.estado_etiqueta)}</strong>
+            <span class="pista">${new Date(e.creado_en).toLocaleString("es-CL")}${
+              e.motivo ? " · " + DVU.escapar(e.motivo) : ""
+            }</span></li>`
+        )
+        .join("")}</ol>`;
+
+    $("pedido-pie").innerHTML = "";
+    const compartir = document.createElement("button");
+    compartir.type = "button";
+    compartir.className = "plano";
+    compartir.textContent = "Mandarlo por WhatsApp";
+    compartir.onclick = () => DVU.porWhatsapp(resumenWhatsapp(p));
+    $("pedido-pie").append(compartir);
+    $("ficha-pedido").showModal();
+  } catch (e) {
+    DVU.avisar(mensaje, e.message, "error");
+  }
+}
+
+$("pedido-cerrar").onclick = () => $("ficha-pedido").close();
+
 $("mios").onclick = async (evento) => {
-  if (!evento.target.classList.contains("repetir")) return;
-  const pedido = $("mios")._pedidos.find((p) => p.numero === evento.target.dataset.numero);
+  const numero = evento.target.closest("button")?.dataset.numero;
+  if (!numero) return;
+  if (evento.target.closest(".ver")) return verPedido(numero);
+  if (!evento.target.closest(".repetir")) return;
+  const pedido = $("mios")._pedidos.find((p) => p.numero === numero);
   const cliente = cartera.get(pedido.cliente_rut) || {
     rut: pedido.cliente_rut,
     razon_social: pedido.cliente_razon_social,

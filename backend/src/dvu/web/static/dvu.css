@@ -691,6 +691,24 @@ table.datos tfoot tr.total th { font-size: 16px; color: var(--rojo); background:
 .barra-pedido strong { font-size: 18px; color: var(--rojo); }
 .barra-pedido .pista { margin: 0; }
 
+/* El detalle de un pedido no tiene foto al lado: es una tabla y una bitácora, y las dos
+ * quieren el ancho completo. */
+dialog.ficha .cuerpo.ancho { display: block; }
+dialog.ficha .cuerpo.ancho h4 { margin: 18px 0 6px; }
+dialog.ficha .cuerpo.ancho .pastilla { vertical-align: middle; }
+
+.bitacora {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 13px;
+}
+.bitacora li { margin-bottom: 4px; }
+.bitacora .pista { margin: 0; display: inline; }
+
+/* El folio abre el detalle: es lo que uno intenta apretar igual. */
+table.datos button.ver { padding: 2px 6px; }
+table.datos button.ver code { background: none; padding: 0; }
+
 dialog.confirmacion {
   border: 0;
   border-radius: 8px;

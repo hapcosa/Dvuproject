@@ -232,7 +232,10 @@ def test_enviar_asigna_folio_y_relee_el_precio_de_hoy(
     # Es el mismo pedido de siempre, con la lista adentro de su bitácora.
     assert cuerpo["client_uuid"] == borrador["client_uuid"]
     detalle = cliente_api.get(f"{PREFIJO}/pedidos/{cuerpo['numero']}", headers=datos["auth"])
-    assert [e["estado_nuevo"] for e in detalle.json()["eventos"]] == ["borrador", "enviado"]
+    eventos = detalle.json()["eventos"]
+    assert [e["estado_nuevo"] for e in eventos] == ["borrador", "enviado"]
+    # La bitácora la lee el vendedor cuando el ferretero pregunta en qué va lo suyo.
+    assert [e["estado_etiqueta"] for e in eventos] == ["Lista sin enviar", "Enviado a DVU"]
 
 
 def test_enviar_una_lista_con_cantidad_invalida_falla_con_el_detalle(

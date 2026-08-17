@@ -48,6 +48,11 @@ const DVU = (() => {
     if (datos.refresh_token) sessionStorage.setItem(CLAVE_REFRESH, datos.refresh_token);
   }
 
+  /** Un error de una línea, en palabras. Llegan de dos formas: la validación de FastAPI
+   *  (`loc`/`msg`) y las reglas del dominio, que hablan de un SKU (`sku`/`error`). */
+  const explicar = (e) =>
+    e?.error ? `${e.sku}: ${e.error}` : `${e?.loc?.slice(1).join(".")}: ${e?.msg}`;
+
   async function pedir(ruta, opciones = {}, reintentando = false) {
     const cabeceras = { ...(opciones.headers || {}) };
     // El cuerpo se arma aparte y no se pisa `opciones`: si hay que reintentar tras
@@ -71,14 +76,20 @@ const DVU = (() => {
       // El detalle del backend es el mensaje útil (qué falta, qué chocó). Se muestra
       // tal cual en vez de un "error 422" que no le dice nada a nadie.
       let detalle = `Error ${respuesta.status}`;
+      let crudo = null;
       try {
         const cuerpo = await respuesta.json();
-        if (typeof cuerpo.detail === "string") detalle = cuerpo.detail;
-        else if (Array.isArray(cuerpo.detail)) {
-          detalle = cuerpo.detail.map((e) => `${e.loc?.slice(1).join(".")}: ${e.msg}`).join(" · ");
-        }
+        crudo = cuerpo.detail;
+        if (typeof crudo === "string") detalle = crudo;
+        else if (Array.isArray(crudo)) detalle = crudo.map(explicar).join(" · ");
       } catch { /* respuesta sin JSON: queda el código */ }
-      throw new Error(detalle);
+
+      // El detalle crudo viaja en el error para que quien llama pueda hacer algo más
+      // que mostrarlo: marcar las líneas malas del pedido, por ejemplo.
+      const error = new Error(detalle);
+      error.estado = respuesta.status;
+      error.detalle = crudo;
+      throw error;
     }
     if (respuesta.status === 204) return null;
     const tipo = respuesta.headers.get("content-type") || "";

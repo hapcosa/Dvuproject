@@ -90,6 +90,8 @@ class EventoOut(BaseModel):
 
     estado_anterior: str | None
     estado_nuevo: str
+    #: `estado_nuevo` en palabras: la bitácora también la lee el vendedor, no sólo bodega.
+    estado_etiqueta: str = ""
     motivo: str | None
     creado_en: datetime
 
@@ -665,6 +667,15 @@ def _poner_contenido(pedido: Pedido, entradas: list[LineaEntrada], session: Sess
     pedido.total_clp = Decimal(totales.total_clp)
 
 
+def _etiqueta(estado: str) -> str:
+    """`enviado` -> «Enviado a DVU». Un estado que el dominio no conoce se muestra crudo
+    en vez de reventar: la bitácora es para leer, no para validar."""
+    try:
+        return ETIQUETAS[EstadoPedido(estado)]
+    except ValueError:
+        return estado
+
+
 def _cliente(rut: str, session: Session) -> Cliente:
     cliente = session.scalar(select(Cliente).where(Cliente.rut == rut))
     if cliente is None or not cliente.activo:
@@ -694,7 +705,7 @@ def _buscar_borrador(client_uuid: uuid_lib.UUID, session: Session, usuario: Usua
         detalle = (
             f"Esa lista ya se envió: es el pedido {pedido.numero}"
             if pedido.estado == EstadoPedido.ENVIADO
-            else f"Esa lista ya no está abierta ({ETIQUETAS[EstadoPedido(pedido.estado)]})"
+            else f"Esa lista ya no está abierta ({_etiqueta(pedido.estado)})"
         )
         raise HTTPException(status.HTTP_409_CONFLICT, detail=detalle)
     return pedido
@@ -719,9 +730,12 @@ def _a_salida(pedido: Pedido, *, con_eventos: bool = False) -> PedidoOut:
     salida = PedidoOut.model_validate(pedido)
     salida.cliente_rut = pedido.cliente.rut
     salida.cliente_razon_social = pedido.cliente.razon_social
-    salida.estado_etiqueta = ETIQUETAS.get(EstadoPedido(pedido.estado), pedido.estado)
+    salida.estado_etiqueta = _etiqueta(pedido.estado)
     # La bitácora completa sólo va en el detalle: en un listado son cientos de filas
     # que nadie mira.
     if not con_eventos:
         salida.eventos = []
+    else:
+        for evento in salida.eventos:
+            evento.estado_etiqueta = _etiqueta(evento.estado_nuevo)
     return salida

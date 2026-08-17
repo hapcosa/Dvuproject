@@ -313,6 +313,18 @@ guardado en el navegador. Antes el carrito estaba en `sessionStorage` y cerrar l
   el pedido va a seguir viajando por ahí mientras el cliente no entre a la web, y copiarlo
   a mano es el paso donde el vendedor abandona la herramienta.
 
+### Lo que ya se envió
+
+El folio en «Mis últimos pedidos» abre el detalle: las líneas como quedaron, los totales
+y la **bitácora de estados**. Es la respuesta a «¿en qué va lo mío?», que hoy la da
+alguien mirando el Excel. Los estados se muestran en palabras —«Enviado a DVU»,
+«Preparándose en bodega»— y no con el nombre de la máquina de estados; las etiquetas
+viven en `dvu.domain.pedido.ETIQUETAS`, no repartidas por las plantillas.
+
+Y cuando el backend rechaza líneas —el 422 de múltiplos, que llega con **todas** las
+malas de una vez— se marcan donde están, con el botón para dejar la cantidad vendible al
+lado. Un párrafo de texto obliga a buscarlas a ojo en una lista de treinta.
+
 ## Cómo probarlo
 
 ```bash
