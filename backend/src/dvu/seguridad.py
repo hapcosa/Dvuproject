@@ -7,6 +7,12 @@ siguiente login sin pedirle nada al usuario.
 Los tokens llevan el `uuid` del usuario en `sub` —nunca el id secuencial, que filtra
 cuántos usuarios hay— y el rol en `rol`, para no consultar la base en cada request.
 El refresh se distingue por `tipo`: un access token no sirve para renovar.
+
+Hay un tercer tipo, `descarga`, que existe porque una descarga grande no puede pasar por
+`fetch`: el catálogo con fotos pesa decenas de MB y el navegador tendría que juntarlo
+entero en memoria antes de escribirlo a disco. Con este token la URL se abre derecho y
+el navegador la baja en streaming, con su barra de progreso. Va en la query, así que
+dura minutos y no sirve para nada más que leer el archivo.
 """
 
 from __future__ import annotations
@@ -21,7 +27,7 @@ from argon2.exceptions import InvalidHashError, VerifyMismatchError
 
 from dvu.config import get_settings
 
-TipoToken = Literal["access", "refresh"]
+TipoToken = Literal["access", "refresh", "descarga"]
 
 _hasher = PasswordHasher()
 
@@ -58,11 +64,11 @@ def emitir_token(
 ) -> str:
     cfg = get_settings()
     emision = ahora or datetime.now(UTC)
-    duracion = (
-        timedelta(minutes=cfg.access_token_minutes)
-        if tipo == "access"
-        else timedelta(days=cfg.refresh_token_days)
-    )
+    duracion = {
+        "access": timedelta(minutes=cfg.access_token_minutes),
+        "refresh": timedelta(days=cfg.refresh_token_days),
+        "descarga": timedelta(minutes=cfg.descarga_token_minutes),
+    }[tipo]
     payload = {
         "sub": str(usuario_uuid),
         "rol": rol,

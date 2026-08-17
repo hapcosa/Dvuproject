@@ -515,6 +515,37 @@ table.editable .edit.guardado { background: #dcfce7; border-left-color: var(--ve
 
 /* --- páginas de diseño, en administración -------------------------------- */
 
+/* --- las tres secciones de la maqueta (portada / ofertas / contraportada) --- */
+
+.seccion-paginas { border-top: 1px solid var(--gris-borde); padding-top: 12px; margin-top: 16px; }
+.seccion-paginas:first-child { border-top: 0; margin-top: 8px; }
+.seccion-paginas > header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+.seccion-paginas h4 { margin: 0; font-size: 15px; }
+.seccion-paginas .cuenta {
+  font-weight: normal;
+  color: var(--gris);
+  font-size: 12px;
+}
+.seccion-paginas > header button { flex: 0 0 auto; }
+.seccion-paginas .sin-paginas { margin: 0; padding: 12px 0; }
+
+/* En edición la tira envuelve en varias filas en vez de correrse a lo ancho: para
+ * arrastrar hay que ver a dónde se suelta, y un destino fuera de pantalla no se ve. */
+.seccion-paginas.editando .tira-paginas {
+  flex-wrap: wrap;
+  overflow-x: visible;
+  background: var(--fondo);
+  border: 1px dashed var(--gris-borde);
+  border-radius: 6px;
+  padding: 12px;
+  min-height: 96px;
+}
+
 .tira-paginas {
   display: flex;
   gap: 12px;
@@ -525,7 +556,28 @@ table.editable .edit.guardado { background: #dcfce7; border-left-color: var(--ve
   margin: 0;
   flex: 0 0 auto;
   width: 132px;
+  position: relative;
 }
+.seccion-paginas.editando .pagina-diseno { cursor: grab; }
+.pagina-diseno.arrastrando { opacity: 0.4; cursor: grabbing; }
+/* El agarre es la señal de que la página se puede mover; sin él el modo edición se ve
+ * igual que el de sólo lectura y nadie prueba arrastrar. */
+.pagina-diseno .agarre {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  z-index: 1;
+  padding: 0 4px;
+  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  font-size: 13px;
+  line-height: 1.4;
+}
+.pagina-diseno .mover, .pagina-diseno .acciones { display: flex; gap: 4px; }
+.pagina-diseno .mover { justify-content: center; }
+.pagina-diseno .acciones { flex-direction: column; }
+.pagina-diseno figcaption button { font-size: 11px; }
 .pagina-diseno img {
   display: block;
   width: 132px;

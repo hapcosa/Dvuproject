@@ -41,6 +41,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from dvu.almacenamiento import Almacen
+from dvu.db import maqueta
 from dvu.db.models import CatalogoActivo, CatalogoPagina, Categoria, Producto
 from dvu.extractor.layout import RANGOS_X
 from dvu.extractor.plantilla import logo_a_la_izquierda
@@ -154,6 +155,15 @@ def _venta_minima(producto: Producto) -> str:
         return ""
     envase = producto.envase or producto.unidad_venta or "UNID"
     return _escapar(f"{producto.multiplo_venta} X {envase}")
+
+
+class CatalogoVacio(Exception):
+    """El filtro no dejó ningún producto.
+
+    Se levanta en vez de emitir el PDF: sin filas el catálogo es la portada, la
+    contraportada y una tabla con sólo el encabezado azul — decenas de MB que el vendedor
+    baja, abre y recién ahí descubre que su búsqueda no encontró nada.
+    """
 
 
 @dataclass(frozen=True, slots=True)
@@ -394,24 +404,26 @@ def _estilo_tabla() -> list[tuple[Any, ...]]:
     ]
 
 
-def _paginas_de_diseno(session: Session) -> tuple[list[CatalogoPagina], list[CatalogoPagina]]:
+def _paginas_de_diseno(
+    session: Session, *, con_ofertas: bool = True
+) -> tuple[list[CatalogoPagina], list[CatalogoPagina]]:
     """Las páginas de arte activas, partidas en las que van antes y después del cuerpo.
 
     En el original las ofertas están intercaladas entre las tablas, pero acá la
     paginación la decide cuántos productos hay: no existe «la página 53» a la que
-    volverlas. Se conserva el orden relativo — portada y lanzamiento adelante, ofertas
-    después del cuerpo, contraportada al final — que es lo que el lector reconoce.
+    volverlas. Se conserva el orden relativo — portada adelante, ofertas después del
+    cuerpo, contraportada al final — que es lo que el lector reconoce. Dentro de cada
+    sección manda el orden que armó el administrador (`dvu.db.maqueta`).
+
+    `con_ofertas=False` deja sólo las tapas. Es para el catálogo filtrado: las hojas de
+    oferta son del catálogo completo y pegarlas detrás de una lista de gasfitería suma
+    decenas de MB de páginas que no hablan de lo que se pidió.
     """
-    paginas = list(
-        session.scalars(
-            select(CatalogoPagina)
-            .where(CatalogoPagina.activa.is_(True))
-            .order_by(CatalogoPagina.archivo, CatalogoPagina.pagina)
-        )
-    )
-    adelante = [p for p in paginas if p.tipo == "portada" or p.pagina <= 2]
-    atras = [p for p in paginas if p not in adelante and p.tipo != "contraportada"]
-    atras += [p for p in paginas if p.tipo == "contraportada"]
+    paginas = maqueta.paginas(session)
+    adelante = [p for p in paginas if p.tipo == "portada"]
+    atras = [
+        p for p in paginas if p.tipo == "contraportada" or (con_ofertas and p.tipo == "promocion")
+    ]
     return adelante, atras
 
 
@@ -472,11 +484,24 @@ def exportar_catalogo_pdf(
     `con_diseno` decide si se pegan la portada, las ofertas y la contraportada
     originales. Por defecto acompaña a `con_imagenes`: una lista de precios con portada
     de catálogo confunde sobre lo que es.
+
+    Con un filtro puesto salen las tapas pero no las hojas de oferta: son del catálogo
+    completo, y pegarlas detrás de una lista de una categoría es medio catálogo de peso
+    en páginas que no responden lo que se preguntó.
+
+    Levanta `CatalogoVacio` si el filtro no dejó productos.
     """
     productos = _consultar(session, categoria=categoria, q=q, limite=limite)
+    if not productos:
+        raise CatalogoVacio(
+            f"Ningún producto activo coincide con {q or categoria!r}"
+            if (q or categoria)
+            else "No hay productos activos en el catálogo"
+        )
     buffer = BytesIO()
     columnas = _columnas(con_imagenes)
     diseno = con_imagenes if con_diseno is None else con_diseno
+    filtrado = bool(categoria or q)
 
     with tempfile.TemporaryDirectory(prefix="dvu-catalogo-") as tmp:
         temporal = Path(tmp)
@@ -486,7 +511,9 @@ def exportar_catalogo_pdf(
 
         # Las páginas de arte se bajan antes del cuerpo porque su cantidad decide en qué
         # número arranca la numeración —y con ella de qué lado va el logo de la banda—.
-        adelante_p, atras_p = _paginas_de_diseno(session) if diseno else ([], [])
+        adelante_p, atras_p = (
+            _paginas_de_diseno(session, con_ofertas=not filtrado) if diseno else ([], [])
+        )
         adelante = _bajar_paginas(adelante_p, almacen)
         atras = _bajar_paginas(atras_p, almacen)
 
@@ -512,4 +539,4 @@ def exportar_catalogo_pdf(
         return _armar(cuerpo, adelante, atras)
 
 
-__all__ = ["Banda", "Portada", "exportar_catalogo_pdf", "formatear_clp"]
+__all__ = ["Banda", "CatalogoVacio", "Portada", "exportar_catalogo_pdf", "formatear_clp"]

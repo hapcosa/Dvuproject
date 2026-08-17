@@ -144,6 +144,47 @@ Decisiones que sostienen eso:
 En `/admin` el filtro «— Sin categoría —» es exactamente la bandeja de revisión del
 clasificador: la lista de lo que falta asignar a mano.
 
+## La maqueta: portada, ofertas y contraportada
+
+Lo que en el catálogo es arte y no tabla. Salen del PDF original (`extraer` las recorta y
+`cargar-catalogo` las registra) y desde `/admin` se agregan, se cambian de lugar, se
+reemplazan y se quitan.
+
+El orden es en dos niveles, y la diferencia entre ellos es la decisión de fondo:
+
+1. **Entre secciones no se puede mover nada.** Portada al principio, ofertas después del
+   cuerpo, contraportada al final. Eso no es una preferencia sino lo que hace que un
+   catálogo se lea como un catálogo, y dejarlo arrastrable sólo permitiría equivocarse.
+2. **Dentro de la sección manda el administrador.** Es la columna `orden`, la que se
+   arrastra en pantalla.
+
+Hasta la migración `b7d2c4e18f30` el orden salía de `(archivo, pagina)` —de qué PDF vino
+el recorte y en qué página estaba—, que es la *procedencia* y no el *lugar*. Con dos PDF
+cargados eso intercalaba las dos portadas con las ofertas del primero y no había forma de
+arreglarlo desde la web: mover `pagina` habría mentido sobre de dónde salió el recorte.
+
+El criterio vive en `dvu/db/maqueta.py` y no repetido en cada consumidor. Son tres —la
+pantalla de administración, el catálogo web y el exportador— y si se desincronizan el
+administrador ve un orden y el PDF sale con otro.
+
+Decisiones:
+
+- **Se arrastra, y también hay flechas ◀ ▶.** El arrastre nativo del navegador no existe
+  al tocar: sin las flechas la pantalla no se puede usar en una tablet.
+- **El orden se manda entero en cada movimiento**, no «esta página subió tres lugares».
+  Es lo único que no depende de qué había antes en la base, y por lo tanto lo único que
+  no se desincroniza si dos pestañas mueven cosas a la vez. Los ids que ya no existen se
+  ignoran en vez de fallar.
+- **Cambiar de sección manda la página al final de la nueva.** Su posición anterior era
+  del orden de la otra sección y ahí no significa nada.
+- **Reemplazar el archivo conserva el lugar y el id.** Es el caso del diseñador que manda
+  la portada corregida: si hubiera que borrar y volver a subir, habría que reacomodarla.
+  Los objetos viejos **no se borran** del almacén — el PDF que se exportó ayer todavía los
+  referencia.
+- **Quitar no borra.** Una oferta que sale en agosto suele volver; «Reponer» la devuelve.
+- **El modo edición es de la pantalla, no del servidor.** No hay estado que quede colgado
+  si alguien cierra la pestaña a la mitad.
+
 ## Volver a PDF
 
 El catálogo web se exporta a PDF con el diseño del impreso, desde los dos botones del
@@ -175,6 +216,20 @@ Decisiones:
 
 - **El filtro de la pantalla viaja al PDF.** Lo que el vendedor ve es lo que se lleva:
   «Gasfitería» son 2 páginas, no 142.
+- **Filtrado salen las tapas pero no las hojas de oferta.** Las ofertas son del catálogo
+  completo: pegadas detrás de una lista de gasfitería son decenas de MB de páginas que no
+  responden lo que se preguntó. La portada y la contraportada sí van, porque son la
+  identidad del documento.
+- **Una búsqueda sin resultados responde 404, no un PDF.** Con las páginas de arte
+  pegadas ese archivo pesa decenas de MB y no tiene ni una fila: el vendedor lo baja, lo
+  abre y recién ahí se entera de que su búsqueda no encontró nada.
+- **Lo baja el navegador, no `fetch`.** Un archivo de decenas de MB traído por `fetch`
+  hay que tenerlo entero en memoria antes de poder escribir un solo byte a disco, sin
+  barra de progreso y sin forma de cancelar; en un celular eso se queda pegado o se cae.
+  La página pide un token corto (`POST /auth/descarga`, dos minutos, sólo lectura) y
+  navega a la URL con él en la query, que es la vía por la que el navegador sabe bajar
+  archivos grandes desde siempre. Va en la query porque al navegar no hay dónde poner el
+  `Authorization`, y por eso es de un tipo aparte: el token de sesión **no** sirve ahí.
 - **Sin fotos se saca la columna «Imagen»**, no se deja en blanco. Una columna vacía a lo
   largo de 51 páginas no informa nada y le roba ancho a la descripción.
 - **Una foto faltante o corrupta no tumba el catálogo.** Se verifica al bajarla, antes de

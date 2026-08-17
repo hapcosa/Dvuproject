@@ -44,6 +44,13 @@ class Refresh(BaseModel):
     refresh_token: str
 
 
+class TokenDescarga(BaseModel):
+    """Permiso de lectura de un rato para bajar un archivo por URL."""
+
+    token: str
+    expires_in: int
+
+
 class UsuarioOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -90,6 +97,21 @@ def refrescar(datos: Refresh, session: SessionDep) -> Tokens:
     if usuario is None or not usuario.activo:
         raise NO_AUTORIZADO
     return _tokens(usuario)
+
+
+@router.post("/descarga", response_model=TokenDescarga)
+def token_de_descarga(usuario: UsuarioDep) -> TokenDescarga:
+    """Un token corto para poner en la URL de una descarga grande.
+
+    El `Authorization` no se puede mandar al navegar a una URL, y bajar el catálogo por
+    `fetch` obliga a juntar decenas de MB en memoria antes de escribirlos: en un celular
+    eso se cuelga o se cae. Con esto la web abre la URL y el navegador la descarga
+    derecho a disco.
+    """
+    return TokenDescarga(
+        token=emitir_token(usuario.uuid, usuario.rol, tipo="descarga"),
+        expires_in=get_settings().descarga_token_minutes * 60,
+    )
 
 
 @router.get("/yo", response_model=UsuarioOut)

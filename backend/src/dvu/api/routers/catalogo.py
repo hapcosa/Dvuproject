@@ -29,6 +29,7 @@ from dvu.almacenamiento import (
 )
 from dvu.api.deps import exige_rol
 from dvu.api.objetos import responder_objeto
+from dvu.db import maqueta
 from dvu.db.models import CatalogoActivo, CatalogoPagina, Usuario
 from dvu.db.session import get_session
 from dvu.extractor.pagina_subida import PaginaIlegible, convertir
@@ -44,7 +45,7 @@ AdminDep = Annotated[Usuario, Depends(exige_rol("admin"))]
 CLAVES_BANNER = {"par": "banner_par", "impar": "banner_impar"}
 
 #: Los mismos tres que acepta la restricción de la tabla.
-TIPOS_PAGINA = frozenset({"portada", "promocion", "contraportada"})
+TIPOS_PAGINA = frozenset(maqueta.SECCIONES)
 
 #: Se acepta el PDF —que es lo que conserva el vector— y las imágenes que un diseñador
 #: entrega de vuelta. De cualquiera de las dos se deriva la otra mitad del par.
@@ -76,6 +77,8 @@ class PaginaDisenoOut(BaseModel):
     pagina: int
     #: `portada`, `promocion` o `contraportada`.
     tipo: str
+    #: Posición dentro de su sección. Ver `dvu.db.maqueta`.
+    orden: int
     activa: bool
 
 
@@ -84,7 +87,14 @@ class PaginaDisenoPatch(BaseModel):
 
     tipo: str | None = None
     pagina: int | None = None
+    orden: int | None = None
     activa: bool | None = None
+
+
+class OrdenPaginas(BaseModel):
+    """Los ids de una sección en el orden nuevo, tal como quedaron en pantalla."""
+
+    ids: list[int]
 
 
 @router.get("/bandas", response_model=list[BandaOut])
@@ -109,10 +119,7 @@ def paginas(session: SessionDep, incluir_inactivas: bool = False) -> list[Catalo
     `incluir_inactivas` es para la pantalla de administración: ahí hay que ver las que se
     sacaron para poder volver a ponerlas. El catálogo público llama sin el parámetro.
     """
-    consulta = select(CatalogoPagina)
-    if not incluir_inactivas:
-        consulta = consulta.where(CatalogoPagina.activa.is_(True))
-    return list(session.scalars(consulta.order_by(CatalogoPagina.archivo, CatalogoPagina.pagina)))
+    return maqueta.paginas(session, incluir_inactivas=incluir_inactivas)
 
 
 @router.post("/paginas", response_model=PaginaDisenoOut, status_code=status.HTTP_201_CREATED)
@@ -129,11 +136,115 @@ async def agregar_pagina(
     Se guarda el par PDF/PNG: el PDF es el que se reinserta al exportar el catálogo y el
     PNG el que ve la web. Da lo mismo cuál de los dos se suba, la otra mitad se deriva.
     """
+    _validar_tipo(tipo)
+    key_pdf, key_png = await _guardar_par(archivo, almacen)
+
+    registro = CatalogoPagina(
+        archivo=ARCHIVO_SUBIDA,
+        pagina=pagina if pagina is not None else _siguiente_pagina(session),
+        tipo=tipo,
+        orden=maqueta.siguiente_orden(session, tipo),
+        key_pdf=key_pdf,
+        key_png=key_png,
+    )
+    session.add(registro)
+    session.commit()
+    session.refresh(registro)
+    return registro
+
+
+@router.put("/paginas/{pagina_id}/archivo", response_model=PaginaDisenoOut)
+async def reemplazar_archivo(
+    pagina_id: int,
+    session: SessionDep,
+    almacen: AlmacenDep,
+    usuario: AdminDep,
+    archivo: Annotated[UploadFile, File()],
+) -> CatalogoPagina:
+    """Cambia el arte de una página que ya está en la maqueta, sin moverla de lugar.
+
+    Es lo que se usa cuando el diseñador manda la portada corregida: la posición, la
+    sección y el id se conservan, así que no hay que volver a acomodarla. Los objetos
+    viejos quedan en el almacén —no se borran— porque el PDF que se exportó ayer todavía
+    los referencia.
+    """
+    registro = _buscar_pagina(session, pagina_id)
+    registro.key_pdf, registro.key_png = await _guardar_par(archivo, almacen)
+    session.commit()
+    session.refresh(registro)
+    return registro
+
+
+@router.put("/paginas/orden", response_model=list[PaginaDisenoOut])
+def reordenar_paginas(
+    orden: OrdenPaginas, session: SessionDep, usuario: AdminDep
+) -> list[CatalogoPagina]:
+    """Guarda el orden de una sección después de arrastrar.
+
+    Llega la sección entera y no «la página 3 pasó a la 1»: reescribir la lista completa
+    es lo único que no depende de qué había antes, y por lo tanto lo único que no se
+    desincroniza si dos pestañas mueven cosas a la vez. Los ids que no existen se
+    ignoran.
+    """
+    tocadas = maqueta.renumerar(session, orden.ids)
+    session.commit()
+    return tocadas
+
+
+@router.patch("/paginas/{pagina_id}", response_model=PaginaDisenoOut)
+def actualizar_pagina(
+    pagina_id: int, cambios: PaginaDisenoPatch, session: SessionDep, usuario: AdminDep
+) -> CatalogoPagina:
+    """Cambia la sección, la posición o si la página sale en el catálogo."""
+    registro = _buscar_pagina(session, pagina_id)
+    if cambios.tipo is not None and cambios.tipo != registro.tipo:
+        _validar_tipo(cambios.tipo)
+        registro.tipo = cambios.tipo
+        # Cambiar de sección la manda al final de la nueva: el `orden` que traía era una
+        # posición de la sección anterior y acá no significa nada. Si `orden` viene en el
+        # mismo PATCH —el arrastre entre secciones lo manda— pisa esto y queda donde se
+        # soltó.
+        registro.orden = maqueta.siguiente_orden(session, cambios.tipo)
+    if cambios.pagina is not None:
+        registro.pagina = cambios.pagina
+    if cambios.orden is not None:
+        registro.orden = cambios.orden
+    if cambios.activa is not None:
+        registro.activa = cambios.activa
+    session.commit()
+    session.refresh(registro)
+    return registro
+
+
+@router.delete("/paginas/{pagina_id}", response_model=PaginaDisenoOut)
+def quitar_pagina(pagina_id: int, session: SessionDep, usuario: AdminDep) -> CatalogoPagina:
+    """Saca la página del catálogo sin borrarla.
+
+    No se borra el registro ni el objeto del bucket: una oferta que se saca en agosto
+    suele volver, y el PDF exportado el mes pasado sigue haciendo referencia a ella.
+    Volver a ponerla es `PATCH` con `activa: true`.
+    """
+    registro = _buscar_pagina(session, pagina_id)
+    registro.activa = False
+    session.commit()
+    session.refresh(registro)
+    return registro
+
+
+def _validar_tipo(tipo: str) -> None:
     if tipo not in TIPOS_PAGINA:
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=f"El tipo es uno de: {', '.join(sorted(TIPOS_PAGINA))}",
         )
+
+
+async def _guardar_par(archivo: UploadFile, almacen: Almacen) -> tuple[str, str]:
+    """Deja el par PDF/PNG en el almacén y devuelve sus dos keys.
+
+    El PDF es el que se reinserta al exportar el catálogo y el PNG el que ve la web. Da
+    lo mismo cuál de los dos se suba, la otra mitad se deriva.
+    """
     if archivo.content_type not in TIPOS_PAGINA_SUBIDA:
         raise HTTPException(
             status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
@@ -163,55 +274,7 @@ async def agregar_pagina(
     base = f"catalogo/paginas/{uuid_lib.uuid4()}"
     almacen.guardar(f"{base}.pdf", BytesIO(pdf), "application/pdf")
     almacen.guardar(f"{base}.png", BytesIO(png), "image/png")
-
-    registro = CatalogoPagina(
-        archivo=ARCHIVO_SUBIDA,
-        pagina=pagina if pagina is not None else _siguiente_pagina(session),
-        tipo=tipo,
-        key_pdf=f"{base}.pdf",
-        key_png=f"{base}.png",
-    )
-    session.add(registro)
-    session.commit()
-    session.refresh(registro)
-    return registro
-
-
-@router.patch("/paginas/{pagina_id}", response_model=PaginaDisenoOut)
-def actualizar_pagina(
-    pagina_id: int, cambios: PaginaDisenoPatch, session: SessionDep, usuario: AdminDep
-) -> CatalogoPagina:
-    """Cambia el tipo, la posición o si la página sale en el catálogo."""
-    registro = _buscar_pagina(session, pagina_id)
-    if cambios.tipo is not None:
-        if cambios.tipo not in TIPOS_PAGINA:
-            raise HTTPException(
-                status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail=f"El tipo es uno de: {', '.join(sorted(TIPOS_PAGINA))}",
-            )
-        registro.tipo = cambios.tipo
-    if cambios.pagina is not None:
-        registro.pagina = cambios.pagina
-    if cambios.activa is not None:
-        registro.activa = cambios.activa
-    session.commit()
-    session.refresh(registro)
-    return registro
-
-
-@router.delete("/paginas/{pagina_id}", response_model=PaginaDisenoOut)
-def quitar_pagina(pagina_id: int, session: SessionDep, usuario: AdminDep) -> CatalogoPagina:
-    """Saca la página del catálogo sin borrarla.
-
-    No se borra el registro ni el objeto del bucket: una oferta que se saca en agosto
-    suele volver, y el PDF exportado el mes pasado sigue haciendo referencia a ella.
-    Volver a ponerla es `PATCH` con `activa: true`.
-    """
-    registro = _buscar_pagina(session, pagina_id)
-    registro.activa = False
-    session.commit()
-    session.refresh(registro)
-    return registro
+    return f"{base}.pdf", f"{base}.png"
 
 
 def _buscar_pagina(session: Session, pagina_id: int) -> CatalogoPagina:

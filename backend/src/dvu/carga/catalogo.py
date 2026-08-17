@@ -31,6 +31,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from dvu.almacenamiento import Almacen
+from dvu.db import maqueta
 from dvu.db.models import (
     CatalogoActivo,
     CatalogoFilaCruda,
@@ -307,6 +308,10 @@ def _cargar_plantilla(
             if not subir(key):
                 del asignaciones[posicion]
         marcas[archivo] = asignaciones
+
+    # Las páginas recién creadas entran con `orden = 0`: el extractor sabe de qué página
+    # del PDF salió cada una, no en qué lugar de la maqueta la quiere el administrador.
+    maqueta.numerar_faltantes(session)
 
     resumen.logos_subidos = sum(1 for k in subidas if k.startswith("catalogo/marcas/"))
     return marcas

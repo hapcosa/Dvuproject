@@ -38,6 +38,10 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     access_token_minutes: int = 60
     refresh_token_days: int = 30
+    #: Vida del token de descarga que viaja en la URL. Es corto a propósito: la URL queda
+    #: en el historial del navegador y en el log del proxy, así que sirve para bajar el
+    #: archivo y nada más. Dos minutos alcanzan de sobra — el catálogo entero tarda ~10 s.
+    descarga_token_minutes: int = 2
 
     # --- infraestructura ---
     database_url: str = "postgresql+psycopg://dvu:dvu@localhost:5432/dvu"

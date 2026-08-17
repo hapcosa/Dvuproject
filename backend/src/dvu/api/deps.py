@@ -11,7 +11,7 @@ import uuid as uuid_lib
 from collections.abc import Callable
 from typing import Annotated
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Query, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -52,6 +52,37 @@ def usuario_actual(
 
 
 UsuarioDep = Annotated[Usuario, Depends(usuario_actual)]
+
+
+def usuario_descargando(
+    session: SessionDep,
+    credenciales: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer)],
+    token: Annotated[str | None, Query(description="Token de descarga, para bajar por URL")] = None,
+) -> Usuario:
+    """Como `usuario_actual`, pero acepta además el token corto de `POST /auth/descarga`.
+
+    Es para los archivos que el navegador tiene que bajar navegando a la URL —el catálogo
+    en PDF pesa decenas de MB y por `fetch` habría que juntarlo entero en memoria—, donde
+    no hay forma de mandar el header `Authorization`. El token de la query dura minutos y
+    sólo vale acá: `usuario_actual` sigue exigiendo uno de tipo `access`.
+    """
+    if credenciales is not None:
+        return usuario_actual(session, credenciales)
+    if token is None:
+        raise NO_AUTORIZADO
+    try:
+        payload = leer_token(token, tipo="descarga")
+        uuid = uuid_lib.UUID(payload["sub"])
+    except (TokenInvalido, KeyError, ValueError) as exc:
+        raise NO_AUTORIZADO from exc
+
+    usuario = session.scalar(select(Usuario).where(Usuario.uuid == uuid))
+    if usuario is None or not usuario.activo:
+        raise NO_AUTORIZADO
+    return usuario
+
+
+DescargaDep = Annotated[Usuario, Depends(usuario_descargando)]
 
 
 def exige_rol(*roles: str) -> Callable[[Usuario], Usuario]:

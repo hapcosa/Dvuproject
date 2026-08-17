@@ -285,9 +285,7 @@ def extraer_paginas_diseno(
             recorte.insert_pdf(doc, from_page=numero - 1, to_page=numero - 1)
             datos_pdf: bytes = recorte.tobytes()
             recorte.close()
-            key_pdf, ruta_pdf = _volcar_con_ruta(
-                datos_pdf, "pdf", destino, "catalogo/paginas"
-            )
+            key_pdf, ruta_pdf = _volcar_con_ruta(datos_pdf, "pdf", destino, "catalogo/paginas")
 
             datos_png: bytes = doc[numero - 1].get_pixmap(dpi=PPI_VISTA_PREVIA).tobytes("png")
             key_png, ruta_png = _volcar_con_ruta(datos_png, "png", destino, "catalogo/paginas")

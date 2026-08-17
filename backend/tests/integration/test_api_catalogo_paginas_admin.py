@@ -245,3 +245,175 @@ def test_dos_paginas_seguidas_no_chocan_de_posicion(
     assert primera.status_code == 201
     assert segunda.status_code == 201
     assert primera.json()["pagina"] != segunda.json()["pagina"]
+
+
+# --- orden dentro de la sección ---------------------------------------------
+#
+# El orden entre secciones no se prueba acá porque no es configurable: lo fija el tipo
+# (`dvu.db.maqueta`). Lo que sigue es lo que el administrador sí mueve.
+
+
+def _ids(cliente: TestClient, tipo: str | None = None) -> list[int]:
+    paginas = cliente.get(f"{PREFIJO}/catalogo/paginas?incluir_inactivas=true").json()
+    return [p["id"] for p in paginas if tipo is None or p["tipo"] == tipo]
+
+
+def test_las_paginas_nuevas_se_apilan_al_final_de_su_seccion(
+    cliente_api: TestClient, almacen: AlmacenDeMentira, datos: dict[str, Any]
+) -> None:
+    primera = _subir(cliente_api, datos, _png(), "a.png", "image/png", "promocion").json()
+    segunda = _subir(cliente_api, datos, _png(), "b.png", "image/png", "promocion").json()
+
+    assert segunda["orden"] > primera["orden"]
+    assert _ids(cliente_api, "promocion") == [primera["id"], segunda["id"]]
+
+
+def test_arrastrar_reordena_la_seccion(
+    cliente_api: TestClient, almacen: AlmacenDeMentira, datos: dict[str, Any]
+) -> None:
+    primera = _subir(cliente_api, datos, _png(), "a.png", "image/png", "portada").json()
+    segunda = _subir(cliente_api, datos, _png(), "b.png", "image/png", "portada").json()
+
+    r = cliente_api.put(
+        f"{PREFIJO}/catalogo/paginas/orden",
+        json={"ids": [segunda["id"], primera["id"]]},
+        headers=datos["auth_admin"],
+    )
+
+    assert r.status_code == 200
+    assert _ids(cliente_api, "portada") == [segunda["id"], primera["id"]]
+
+
+def test_el_orden_se_reescribe_entero_y_no_deja_huecos(
+    cliente_api: TestClient, almacen: AlmacenDeMentira, datos: dict[str, Any]
+) -> None:
+    """Es lo que permite mandar la lista completa en cada arrastre sin acumular saltos."""
+    creadas = [
+        _subir(cliente_api, datos, _png(), f"{i}.png", "image/png", "promocion").json()
+        for i in range(3)
+    ]
+
+    cliente_api.put(
+        f"{PREFIJO}/catalogo/paginas/orden",
+        json={"ids": [c["id"] for c in reversed(creadas)]},
+        headers=datos["auth_admin"],
+    )
+
+    paginas = cliente_api.get(f"{PREFIJO}/catalogo/paginas").json()
+    assert [p["orden"] for p in paginas] == [1, 2, 3]
+
+
+def test_mover_una_pagina_de_seccion_la_manda_al_final_de_la_nueva(
+    cliente_api: TestClient, almacen: AlmacenDeMentira, datos: dict[str, Any]
+) -> None:
+    """Su posición anterior era de la otra sección y ahí no significa nada."""
+    quieta = _subir(cliente_api, datos, _png(), "a.png", "image/png", "contraportada").json()
+    viajera = _subir(cliente_api, datos, _png(), "b.png", "image/png", "promocion").json()
+
+    r = cliente_api.patch(
+        f"{PREFIJO}/catalogo/paginas/{viajera['id']}",
+        json={"tipo": "contraportada"},
+        headers=datos["auth_admin"],
+    )
+
+    assert r.status_code == 200
+    assert r.json()["orden"] > quieta["orden"]
+    assert _ids(cliente_api, "contraportada") == [quieta["id"], viajera["id"]]
+
+
+def test_reordenar_ignora_los_ids_que_no_existen(
+    cliente_api: TestClient, almacen: AlmacenDeMentira, datos: dict[str, Any]
+) -> None:
+    """Pasa cuando otra pestaña borró una página: se guarda el resto en vez de fallar."""
+    creada = _subir(cliente_api, datos, _png(), "a.png", "image/png", "portada").json()
+
+    r = cliente_api.put(
+        f"{PREFIJO}/catalogo/paginas/orden",
+        json={"ids": [9999, creada["id"]]},
+        headers=datos["auth_admin"],
+    )
+
+    assert r.status_code == 200
+    assert [p["id"] for p in r.json()] == [creada["id"]]
+
+
+def test_el_vendedor_no_reordena_la_maqueta(
+    cliente_api: TestClient, almacen: AlmacenDeMentira, datos: dict[str, Any]
+) -> None:
+    r = cliente_api.put(
+        f"{PREFIJO}/catalogo/paginas/orden", json={"ids": []}, headers=datos["auth_vendedor"]
+    )
+
+    assert r.status_code == 403
+
+
+# --- reemplazar el archivo de una página ------------------------------------
+
+
+def _reemplazar(
+    cliente: TestClient, datos: dict[str, Any], pagina_id: int, contenido: bytes, tipo: str
+) -> Any:
+    return cliente.put(
+        f"{PREFIJO}/catalogo/paginas/{pagina_id}/archivo",
+        files={"archivo": ("nueva.png", io.BytesIO(contenido), tipo)},
+        headers=datos["auth_admin"],
+    )
+
+
+def test_reemplazar_el_archivo_conserva_el_lugar(
+    cliente_api: TestClient, almacen: AlmacenDeMentira, datos: dict[str, Any], sesion: Session
+) -> None:
+    """Es el caso del diseñador que manda la portada corregida: no hay que reacomodarla."""
+    primera = _subir(cliente_api, datos, _png(), "a.png", "image/png", "portada").json()
+    segunda = _subir(cliente_api, datos, _png(), "b.png", "image/png", "portada").json()
+    antes = sesion.get(CatalogoPagina, primera["id"])
+    assert antes is not None
+    key_vieja = antes.key_png
+
+    r = _reemplazar(cliente_api, datos, primera["id"], _pdf_de_una_pagina(), "application/pdf")
+
+    assert r.status_code == 200
+    assert r.json()["orden"] == primera["orden"]
+    assert _ids(cliente_api, "portada") == [primera["id"], segunda["id"]]
+    sesion.refresh(antes)
+    assert antes.key_png != key_vieja
+    assert almacen.contenido[antes.key_pdf].startswith(b"%PDF")
+    # El objeto viejo no se borra: el PDF exportado ayer todavía lo referencia.
+    assert key_vieja in almacen.contenido
+
+
+def test_reemplazar_con_un_archivo_ilegible_no_toca_la_pagina(
+    cliente_api: TestClient, almacen: AlmacenDeMentira, datos: dict[str, Any], sesion: Session
+) -> None:
+    creada = _subir(cliente_api, datos, _png(), "a.png", "image/png", "portada").json()
+    registro = sesion.get(CatalogoPagina, creada["id"])
+    assert registro is not None
+    key_buena = registro.key_png
+
+    r = _reemplazar(cliente_api, datos, creada["id"], b"%PDF pero no", "application/pdf")
+
+    assert r.status_code == 422
+    sesion.refresh(registro)
+    assert registro.key_png == key_buena
+
+
+def test_reemplazar_una_pagina_que_no_existe(
+    cliente_api: TestClient, almacen: AlmacenDeMentira, datos: dict[str, Any]
+) -> None:
+    r = _reemplazar(cliente_api, datos, 9999, _png(), "image/png")
+
+    assert r.status_code == 404
+
+
+def test_el_vendedor_no_reemplaza_el_arte(
+    cliente_api: TestClient, almacen: AlmacenDeMentira, datos: dict[str, Any]
+) -> None:
+    creada = _subir(cliente_api, datos, _png(), "a.png", "image/png", "portada").json()
+
+    r = cliente_api.put(
+        f"{PREFIJO}/catalogo/paginas/{creada['id']}/archivo",
+        files={"archivo": ("n.png", io.BytesIO(_png()), "image/png")},
+        headers=datos["auth_vendedor"],
+    )
+
+    assert r.status_code == 403

@@ -17,7 +17,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-from dvu.carga.catalogo_impreso import exportar_catalogo_pdf, formatear_clp
+from dvu.carga.catalogo_impreso import CatalogoVacio, exportar_catalogo_pdf, formatear_clp
 from dvu.carga.categorias import clasificar_catalogo
 from dvu.db.models import (
     CatalogoActivo,
@@ -376,3 +376,149 @@ def test_sin_logo_la_marca_cae_al_nombre_escrito(
     """Un producto cargado a mano por el administrador no tiene logo del PDF. Antes de
     dejar la celda vacía se escribe la marca: el dato existe."""
     assert "VINILIT" in _texto(exportar_catalogo_pdf(sesion, almacen))
+
+
+# --- el orden de la maqueta -------------------------------------------------
+
+
+def _maqueta_completa(sesion: Session, almacen: AlmacenDeMentira) -> None:
+    """Una portada, dos ofertas y una contraportada, cargadas a propósito desordenadas.
+
+    Los `orden` van al revés de como deben salir: si el exportador usara el orden de
+    inserción o el de la base, el PDF saldría con las ofertas al revés y el test no lo
+    notaría.
+    """
+    piezas = [
+        ("contraportada", "CIERRE DVU", 1),
+        ("promocion", "OFERTA B", 2),
+        ("promocion", "OFERTA A", 1),
+    ]
+    for numero, (tipo, texto, orden) in enumerate(piezas, start=10):
+        base = f"catalogo/paginas/{tipo}-{numero}"
+        almacen.guardar(f"{base}.pdf", BytesIO(_pdf_de_una_pagina(texto)), "application/pdf")
+        almacen.guardar(f"{base}.png", BytesIO(_png("blue")), "image/png")
+        sesion.add(
+            CatalogoPagina(
+                archivo="CAT.pdf",
+                pagina=numero,
+                tipo=tipo,
+                orden=orden,
+                key_pdf=f"{base}.pdf",
+                key_png=f"{base}.png",
+            )
+        )
+    sesion.flush()
+
+
+def test_las_secciones_salen_portada_cuerpo_ofertas_contraportada(
+    sesion: Session, almacen: AlmacenDeMentira, datos: dict[str, Any], plantilla: None
+) -> None:
+    """El orden de las secciones no es configurable: es lo que hace que se lea como catálogo."""
+    _maqueta_completa(sesion, almacen)
+
+    with fitz.open(stream=exportar_catalogo_pdf(sesion, almacen), filetype="pdf") as doc:
+        paginas = [doc[i].get_text() for i in range(doc.page_count)]
+
+    assert "PORTADA DVU" in paginas[0]
+    assert "CIERRE DVU" in paginas[-1]
+    ofertas = [i for i, t in enumerate(paginas) if "OFERTA" in t]
+    assert ofertas, "las ofertas tienen que estar pegadas"
+    assert min(ofertas) > 0, "las ofertas van después del cuerpo, no antes"
+    assert max(ofertas) < len(paginas) - 1, "la contraportada cierra"
+
+
+def test_dentro_de_la_seccion_manda_el_orden_del_administrador(
+    sesion: Session, almacen: AlmacenDeMentira, datos: dict[str, Any], plantilla: None
+) -> None:
+    """Es lo que se arrastra en la pantalla de administración."""
+    _maqueta_completa(sesion, almacen)
+
+    with fitz.open(stream=exportar_catalogo_pdf(sesion, almacen), filetype="pdf") as doc:
+        textos = [doc[i].get_text() for i in range(doc.page_count)]
+
+    posicion = {
+        rotulo: next(i for i, t in enumerate(textos) if rotulo in t)
+        for rotulo in ("OFERTA A", "OFERTA B")
+    }
+    assert posicion["OFERTA A"] < posicion["OFERTA B"]
+
+
+def test_el_catalogo_filtrado_lleva_tapas_pero_no_las_ofertas(
+    sesion: Session, almacen: AlmacenDeMentira, datos: dict[str, Any], plantilla: None
+) -> None:
+    """Las hojas de oferta son del catálogo completo: detrás de una categoría son medio
+    catálogo de peso en páginas que no responden lo que se preguntó."""
+    _maqueta_completa(sesion, almacen)
+    clasificar_catalogo(sesion)
+
+    with fitz.open(
+        stream=exportar_catalogo_pdf(sesion, almacen, categoria="gasfiteria"), filetype="pdf"
+    ) as doc:
+        textos = "".join(doc[i].get_text() for i in range(doc.page_count))
+
+    assert "PORTADA DVU" in textos
+    assert "CIERRE DVU" in textos
+    assert "OFERTA" not in textos
+
+
+def test_un_filtro_sin_resultados_avisa_en_vez_de_emitir_un_pdf_vacio(
+    sesion: Session, almacen: AlmacenDeMentira, datos: dict[str, Any], plantilla: None
+) -> None:
+    """Con las páginas de arte pegadas ese PDF pesa decenas de MB y no tiene ni una fila:
+    el vendedor lo baja, lo abre y recién ahí descubre que su búsqueda no encontró nada."""
+    with pytest.raises(CatalogoVacio):
+        exportar_catalogo_pdf(sesion, almacen, q="no-existe-este-producto")
+
+
+# --- bajarlo por URL, que es como el navegador sabe bajar archivos grandes ---
+
+
+def test_el_pdf_se_baja_con_el_token_de_descarga_en_la_url(
+    sesion: Session, cliente_api: TestClient, datos: dict[str, Any]
+) -> None:
+    """Al navegar a una URL no hay dónde poner el `Authorization`, y el catálogo con
+    fotos pesa demasiado para juntarlo en memoria antes de escribirlo."""
+    permiso = cliente_api.post(f"{PREFIJO}/auth/descarga", headers=datos["auth_admin"]).json()
+
+    respuesta = cliente_api.get(
+        f"{PREFIJO}/reportes/catalogo.pdf", params={"token": permiso["token"]}
+    )
+
+    assert respuesta.status_code == 200
+    assert respuesta.content.startswith(b"%PDF")
+
+
+def test_el_token_de_sesion_no_sirve_en_la_url(
+    sesion: Session, cliente_api: TestClient, datos: dict[str, Any]
+) -> None:
+    """La query queda en el historial del navegador y en el log del proxy: lo que se
+    filtre por ahí tiene que servir para bajar un archivo y para nada más."""
+    de_sesion = datos["auth_admin"]["Authorization"].removeprefix("Bearer ")
+
+    respuesta = cliente_api.get(f"{PREFIJO}/reportes/catalogo.pdf", params={"token": de_sesion})
+
+    assert respuesta.status_code == 401
+
+
+def test_el_token_de_descarga_no_abre_el_resto_de_la_api(
+    sesion: Session, cliente_api: TestClient, datos: dict[str, Any]
+) -> None:
+    permiso = cliente_api.post(f"{PREFIJO}/auth/descarga", headers=datos["auth_admin"]).json()
+
+    respuesta = cliente_api.get(
+        f"{PREFIJO}/auth/yo", headers={"Authorization": f"Bearer {permiso['token']}"}
+    )
+
+    assert respuesta.status_code == 401
+
+
+def test_una_busqueda_sin_resultados_responde_404_y_no_un_pdf(
+    sesion: Session, cliente_api: TestClient, datos: dict[str, Any]
+) -> None:
+    respuesta = cliente_api.get(
+        f"{PREFIJO}/reportes/catalogo.pdf",
+        params={"q": "no-existe-este-producto"},
+        headers=datos["auth_admin"],
+    )
+
+    assert respuesta.status_code == 404
