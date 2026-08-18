@@ -354,13 +354,22 @@ Después, en <http://localhost:8000>:
 
 ## Roles
 
+**Todos son de gente que trabaja en DVU.** No hay cuentas para las ferreterías que
+compran: este sistema es interno.
+
 | Rol | Qué hace |
 |---|---|
 | `admin` | Todo: cobranza, facturación, usuarios y catálogo. |
 | `editor` | Edita el catálogo y lo imprime. **No** ve cobranza ni facturación. |
 | `vendedor` | Arma pedidos en terreno y registra los comprobantes de pago. |
-| `cliente` | La ferretería que compra: arma su propio pedido. |
 | `bodega` | Prepara y despacha los pedidos. |
+
+Hubo un rol `cliente`, pensado para que el ferretero armara su propio pedido. Eso es un
+ecommerce: sería **otro servidor y otro stack**, y por ahora es una idea que no se sabe si
+se hará. Mientras tanto un rol así es una cuenta de fuera dentro del sistema de la casa,
+así que se quitó. Con él se fue el segundo almacén del carrito —la lista guardada en el
+navegador, que existía sólo porque ese rol no tenía dónde dejarla— y las cuatro ramas que
+colgaban de `guardaVarias`.
 
 La lista vive en `dvu.domain.roles` y de ahí sale todo lo demás —el `CheckConstraint`,
 los `exige_rol`, el seed y el desplegable de la pantalla—. Estaba repartida en cuatro
@@ -371,7 +380,7 @@ y hasta ahora la única forma de dejarlo editar era darle `admin`.
 
 Los usuarios los crea la administración desde `/admin`. Sólo puede dar `vendedor` y
 `editor`: `admin` se queda fuera a propósito —repartir el rol que puede todo no debería
-ser un formulario más— y `cliente` y `bodega` no se pidieron. Un usuario **no se borra**,
+ser un formulario más— y `bodega` no se pidió. Un usuario **no se borra**,
 se desactiva: sus pedidos y comprobantes lo apuntan.
 
 ## Qué falta

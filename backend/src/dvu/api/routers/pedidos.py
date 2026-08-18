@@ -50,6 +50,7 @@ from dvu.domain.pedido import (
     transicionar,
     validar_cantidad,
 )
+from dvu.domain.roles import BODEGA, VENDEDOR
 from dvu.facturacion import tiene_guia
 
 router = APIRouter(prefix="/pedidos", tags=["pedidos"])
@@ -193,7 +194,7 @@ def crear(
     entrada: PedidoEntrada,
     session: SessionDep,
     response: Response,
-    usuario: Annotated[Usuario, Depends(exige_rol("vendedor", "cliente"))],
+    usuario: Annotated[Usuario, Depends(exige_rol(VENDEDOR))],
 ) -> PedidoOut:
     """Crea el pedido, o devuelve el existente si el `client_uuid` ya se sincronizó."""
     existente = _por_client_uuid(entrada.client_uuid, session)
@@ -276,7 +277,7 @@ def listar(
 #: Las listas guardadas son del vendedor que las arma. Un usuario con rol `cliente` no
 #: tiene a quién atribuírselas —`vendedor_id` queda nulo y no hay vínculo usuario↔cliente—
 #: así que sigue armando su pedido en el navegador y enviándolo con `POST /pedidos`.
-VendedorDep = Annotated[Usuario, Depends(exige_rol("vendedor"))]
+VendedorDep = Annotated[Usuario, Depends(exige_rol(VENDEDOR))]
 
 
 @router.post("/cotizar", response_model=CotizacionOut)
@@ -444,7 +445,7 @@ def cambiar_estado(
     numero: str,
     cambio: CambioEstado,
     session: SessionDep,
-    usuario: Annotated[Usuario, Depends(exige_rol("bodega"))],
+    usuario: Annotated[Usuario, Depends(exige_rol(BODEGA))],
 ) -> PedidoOut:
     """Avanza el pedido por su máquina de estados.
 

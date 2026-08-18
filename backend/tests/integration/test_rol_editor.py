@@ -145,3 +145,37 @@ def test_los_comprobantes_no_se_ven_por_tener_sesion(
     assert (
         cliente_api.get(f"{PREFIJO}/comprobantes", headers=escenario["vendedor"]).status_code == 200
     )
+
+
+# --- el rol cliente ya no existe ---------------------------------------------
+
+
+def test_no_se_puede_crear_un_usuario_con_rol_cliente(
+    cliente_api: TestClient, sesion: Session
+) -> None:
+    """Este sistema es sólo para gente que trabaja en DVU.
+
+    `cliente` estaba pensado para que el ferretero armara su propio pedido, o sea para un
+    ecommerce, que sería otro servidor y otro stack. Mientras eso siga siendo una idea, un
+    rol así en esta base es una cuenta de fuera dentro del sistema de la casa.
+    """
+    from dvu.domain.roles import ROLES
+
+    assert "cliente" not in ROLES
+
+    admin = Usuario(email="a2@test.cl", nombre="A", rol=ADMIN, password_hash=hashear("x"))
+    sesion.add(admin)
+    sesion.flush()
+
+    r = cliente_api.post(
+        f"{PREFIJO}/usuarios",
+        json={
+            "email": "ferretero@externo.cl",
+            "nombre": "Ferretero",
+            "rol": "cliente",
+            "password": "clave-larga-1234",
+        },
+        headers={"Authorization": f"Bearer {emitir_token(admin.uuid, ADMIN)}"},
+    )
+
+    assert r.status_code == 422

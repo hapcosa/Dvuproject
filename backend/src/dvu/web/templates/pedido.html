@@ -6,7 +6,7 @@
 <div id="app" hidden>
   <div id="mensaje" hidden></div>
 
-  <!-- Las listas guardadas. Quien no las tiene (rol `cliente`) igual arma la suya. -->
+  <!-- Las listas guardadas: una por ferretería, en el servidor. -->
   <section class="tarjeta" id="panel-listas">
     <h2>Mis listas</h2>
     <p class="pista" id="pista-listas">
@@ -158,7 +158,7 @@
  *   toques más por producto.
  * - La lista vive en el servidor (`/pedidos/borradores`), no en el navegador: la
  *   mañana del vendedor son cinco ferreterías, y una lista a medias que se pierde
- *   porque se cerró la pestaña es trabajo que hay que rehacer con el cliente al lado.
+ *   porque se cerró la pestaña es trabajo que hay que rehacer con el ferretero al lado.
  * - Los totales los calcula el servidor (`/pedidos/cotizar`). La regla del IVA vive
  *   en el dominio y esta página no la repite; de paso el precio que se muestra es el
  *   de hoy, no el de cuando se empezó la lista.
@@ -720,7 +720,7 @@ $("mios").onclick = async (evento) => {
 /* --- carga inicial -------------------------------------------------------- */
 
 DVU.proteger({
-  rol: ["vendedor", "cliente"],
+  rol: ["vendedor"],
   alIngresar: async (quien) => {
     usuario = quien;
     // «Ver completa» acá no navega: la tabla grande está en esta misma página.
@@ -732,7 +732,7 @@ DVU.proteger({
       alEnviar: () => { carrito.abrirDrawer(false); enviar(); },
     });
 
-    await carrito.montar(quien);
+    await carrito.montar();
     pintarCartera();
 
     $("listas").hidden = !carrito.almacen.guardaVarias;

@@ -15,8 +15,13 @@ construcción. Vende **B2B**: sus clientes son otras ferreterías, no consumidor
 4. El dueño **verifica el pago a mano** mirando la cartola del banco.
 5. Alguien transcribe ventas y pagos a un **Excel**.
 
-**Sistema objetivo:** ecommerce B2B + app Android para vendedores + conciliación bancaria
-automática + DTE al SII + seguimiento del pedido hasta la entrega.
+**Sistema objetivo:** app Android para vendedores + conciliación bancaria automática +
+DTE al SII + seguimiento del pedido hasta la entrega. Todo **interno**: lo usa gente que
+trabaja en DVU.
+
+El ecommerce B2B —que el ferretero entre y compre solo— aparece en el plan maestro como
+fase posterior y hoy **no está decidido**. Si se hace, sería otro servidor y otro stack;
+este sistema no le abre la puerta a medias mientras tanto (ver la regla 6).
 
 El plan completo por fases está en [`docs/00-plan-maestro.md`](docs/00-plan-maestro.md).
 Lo que falta y no es código —credenciales, trámites, decisiones del negocio— está en
@@ -45,7 +50,12 @@ Estas salieron del análisis del catálogo real. Romperlas produce un sistema in
    electrónica**.
 5. **La conciliación de pagos nunca es 100% automática.** Siempre existe una bandeja de
    excepciones humana. Un pago que no matchea no se descarta: queda `pendiente_revision`.
-6. **La app del vendedor es offline-first.** Se usa en bodegas y obras sin señal. Todo
+6. **El sistema es interno: sólo gente que trabaja en DVU.** No hay cuentas para las
+   ferreterías. Los roles son `admin`, `editor`, `vendedor` y `bodega`, y salen de
+   `dvu.domain.roles`. El ecommerce —que el ferretero entre y compre— sería **otro
+   servidor y otro stack**, y hoy es sólo una idea: no se le abre la puerta a medias
+   acá.
+7. **La app del vendedor es offline-first.** Se usa en bodegas y obras sin señal. Todo
    pedido se crea local con `client_uuid` y se sincroniza después; el backend debe ser
    **idempotente** frente a reenvíos.
 

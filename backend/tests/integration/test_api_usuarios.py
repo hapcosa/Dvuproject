@@ -105,12 +105,13 @@ def test_no_se_repite_el_correo(cliente_api: TestClient, gente: dict[str, Any]) 
     assert "nueva@dvu.cl" in r.json()["detail"]
 
 
-@pytest.mark.parametrize("rol", ["admin", "bodega", "inventado"])
+@pytest.mark.parametrize("rol", ["admin", "bodega", "cliente", "inventado"])
 def test_solo_se_pueden_dar_los_roles_asignables(
     cliente_api: TestClient, gente: dict[str, Any], rol: str
 ) -> None:
     """`admin` queda fuera a propósito: repartir el rol que puede todo no debería ser un
-    formulario más de la pantalla."""
+    formulario más de la pantalla. `cliente` ya no existe —este sistema es sólo para
+    gente que trabaja en DVU— y el endpoint tiene que decirlo, no aceptarlo callado."""
     r = cliente_api.post(f"{PREFIJO}/usuarios", json=_nuevo(rol=rol), headers=gente["auth_admin"])
 
     assert r.status_code == 422

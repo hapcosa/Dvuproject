@@ -31,7 +31,7 @@ const DVU = (() => {
   //: está en `dvu.domain.roles`; acá sólo vive qué página abre cuál.
   const PAGINAS = [
     { ruta: "/", nombre: "Catálogo", roles: null },
-    { ruta: "/pedido", nombre: "Armar pedido", roles: ["vendedor", "cliente"] },
+    { ruta: "/pedido", nombre: "Armar pedido", roles: ["vendedor"] },
     { ruta: "/vendedor", nombre: "Comprobantes", roles: ["vendedor"] },
     { ruta: "/cobranza", nombre: "Cobranza", roles: ["admin"] },
     { ruta: "/admin", nombre: "Administrar catálogo", roles: ["editor"] },
@@ -81,7 +81,6 @@ const DVU = (() => {
     // que el siguiente encuentre abierta la lista a medias de otra ferretería es
     // exactamente lo que el token en sessionStorage estaba evitando.
     sessionStorage.removeItem(CLAVE_ACTIVA);
-    sessionStorage.removeItem(CLAVE_LOCAL);
     quienEntro = null;
   }
 
@@ -414,13 +413,16 @@ const DVU = (() => {
    */
 
   const CLAVE_ACTIVA = "dvu_lista_activa";
-  const CLAVE_LOCAL = "dvu_lista";
 
-  /** El vendedor guarda sus listas en el servidor: la mañana son cinco ferreterías y una
-   *  lista a medias que se pierde por cerrar la pestaña es trabajo que hay que rehacer
-   *  con el cliente al lado. */
-  const enServidor = {
-    guardaVarias: true,
+  /** Las listas viven en el servidor: la mañana del vendedor son cinco ferreterías, y
+   *  una lista a medias que se pierde por cerrar la pestaña es trabajo que hay que
+   *  rehacer con el ferretero al lado.
+   *
+   *  Hubo un segundo almacén, en el navegador, para el rol `cliente` —que armaba una
+   *  sola lista y no tenía dónde guardarla—. Ese rol se fue con el ecommerce: este
+   *  sistema es para gente que trabaja en DVU. Con un solo almacén se van también el
+   *  `guardaVarias` y las cuatro ramas que colgaban de él. */
+  const almacen = {
     listar: () => pedir("/pedidos/borradores"),
     crear: (cliente, lineas = []) =>
       pedir("/pedidos/borradores", {
@@ -442,43 +444,6 @@ const DVU = (() => {
       }),
     descartar: (l) => pedir(`/pedidos/borradores/${l.client_uuid}`, { method: "DELETE" }),
     enviar: (l) => pedir(`/pedidos/borradores/${l.client_uuid}/enviar`, { method: "POST" }),
-  };
-
-  /** Un usuario con rol `cliente` no tiene a quién atribuirle varias listas —no hay
-   *  vínculo usuario↔cliente— así que arma una sola en el navegador. */
-  const enNavegador = {
-    guardaVarias: false,
-    listar: () => {
-      const guardada = JSON.parse(sessionStorage.getItem(CLAVE_LOCAL) || "null");
-      return Promise.resolve(guardada ? [guardada] : []);
-    },
-    crear: (cliente, lineas = []) =>
-      Promise.resolve({
-        client_uuid: uuid(),
-        cliente_rut: cliente.rut,
-        cliente_razon_social: cliente.razon_social,
-        observaciones: null,
-        lineas,
-      }),
-    guardar: (l) => {
-      sessionStorage.setItem(CLAVE_LOCAL, JSON.stringify(l));
-      return Promise.resolve(l);
-    },
-    descartar: () => {
-      sessionStorage.removeItem(CLAVE_LOCAL);
-      return Promise.resolve();
-    },
-    enviar: (l) =>
-      pedir("/pedidos", {
-        method: "POST",
-        body: {
-          client_uuid: l.client_uuid,
-          cliente_rut: l.cliente_rut,
-          observaciones: l.observaciones || null,
-          creado_en_dispositivo: new Date().toISOString(),
-          lineas: l.lineas.map((x) => ({ sku: x.sku, cantidad: x.cantidad })),
-        },
-      }),
   };
 
   /** Cuántos envases son esas unidades. La página habla de envases; el backend, de
@@ -505,7 +470,7 @@ const DVU = (() => {
 
   const carrito = {
     lista: null,
-    almacen: enNavegador,
+    almacen,
     /** Lo último que respondió `/pedidos/cotizar`, por SKU. */
     cotizado: new Map(),
     totales: { ...SIN_TOTALES },
@@ -535,9 +500,9 @@ const DVU = (() => {
     if (!carrito.lista) return;
     marcarGuardado("Guardando…");
     try {
-      await carrito.almacen.guardar(carrito.lista);
+      await almacen.guardar(carrito.lista);
       marcarGuardado("Guardado", "ok");
-      if (carrito.almacen.guardaVarias) carrito.refrescarBorradores();
+      carrito.refrescarBorradores();
     } catch (e) {
       // La lista completa viaja en cada guardado, así que el próximo cambio reintenta
       // solo y sin arrastrar lo que se perdió. Mientras tanto se dice, no se oculta.
@@ -587,7 +552,7 @@ const DVU = (() => {
     // y en esos casos el drawer se quedaba mostrando el selector como si no hubiera nada
     // elegido, con la lista recién creada abierta detrás.
     eligiendoCliente = false;
-    if (carrito.almacen.guardaVarias) sessionStorage.setItem(CLAVE_ACTIVA, carrito.lista.client_uuid);
+    sessionStorage.setItem(CLAVE_ACTIVA, carrito.lista.client_uuid);
     marcarGuardado("Guardado", "ok");
     cotizarPronto();
     avisarCambio();
@@ -648,15 +613,14 @@ const DVU = (() => {
   carrito.enLista = (sku) => carrito.lista?.lineas.find((l) => l.sku === sku);
 
   carrito.crear = async function (cliente, lineas = []) {
-    const borrador = await carrito.almacen.crear(cliente, lineas);
-    if (!carrito.almacen.guardaVarias) await carrito.almacen.guardar(aLista(borrador));
+    const borrador = await almacen.crear(cliente, lineas);
     await carrito.refrescarBorradores();
     return carrito.abrir(borrador);
   };
 
   carrito.refrescarBorradores = async function () {
     try {
-      carrito.borradores = await carrito.almacen.listar();
+      carrito.borradores = await almacen.listar();
     } catch { carrito.borradores = []; }
     avisarCambio();
     return carrito.borradores;
@@ -680,16 +644,15 @@ const DVU = (() => {
    *  servidor es lo que se convierte en pedido, no lo que hay en pantalla. */
   carrito.enviar = async function () {
     guardarPronto.cancelar();
-    await carrito.almacen.guardar(carrito.lista);
-    const pedido = await carrito.almacen.enviar(carrito.lista);
-    if (!carrito.almacen.guardaVarias) sessionStorage.removeItem(CLAVE_LOCAL);
+    await almacen.guardar(carrito.lista);
+    const pedido = await almacen.enviar(carrito.lista);
     carrito.cerrar();
     carrito.refrescarBorradores();
     return pedido;
   };
 
   carrito.descartar = async function () {
-    await carrito.almacen.descartar(carrito.lista);
+    await almacen.descartar(carrito.lista);
     carrito.cerrar();
     carrito.refrescarBorradores();
   };
@@ -768,9 +731,8 @@ const DVU = (() => {
 
   /** El selector de ferretería: sin esto «Agregar» no tiene a quién atribuirse. */
   function selectorHtml() {
-    const abiertas = carrito.almacen.guardaVarias
-      ? carrito.borradores.filter((b) => b.client_uuid !== carrito.lista?.client_uuid)
-      : [];
+    const abiertas = carrito.borradores.filter(
+      (b) => b.client_uuid !== carrito.lista?.client_uuid);
     return `
       <div class="elegir-cliente">
         <label for="carrito-cliente">¿Para qué ferretería?</label>
@@ -970,18 +932,15 @@ const DVU = (() => {
     }
   });
 
-  /** Deja el carrito listo en cualquier página: elige dónde se guarda según el rol,
-   *  carga la cartera y retoma la lista activa —la que quedó abierta en la otra página—. */
-  carrito.montar = async function (usuario) {
-    carrito.almacen = usuario.rol === "vendedor" ? enServidor : enNavegador;
+  /** Deja el carrito listo en cualquier página: carga la cartera y retoma la lista
+   *  activa, la que quedó abierta en la otra página. */
+  carrito.montar = async function () {
     carrito.montado = true;
     await carrito.cargarCartera();
     await carrito.refrescarBorradores();
 
     const activa = sessionStorage.getItem(CLAVE_ACTIVA);
-    const retomar = carrito.almacen.guardaVarias
-      ? carrito.borradores.find((b) => b.client_uuid === activa)
-      : carrito.borradores[0];
+    const retomar = carrito.borradores.find((b) => b.client_uuid === activa);
     if (retomar) carrito.abrir(retomar);
     else avisarCambio();
     return carrito;

@@ -200,13 +200,12 @@ def test_sin_numero_de_operacion_no_se_marca_duplicado(
     assert segunda.json()["estado"] == "listo"
 
 
-def test_el_cliente_no_puede_registrar_comprobantes(
-    cliente_api: TestClient, sesion: Session
-) -> None:
-    usuario = Usuario(email="c@test.cl", nombre="C", rol="cliente", password_hash=hashear("x"))
+def test_bodega_no_puede_registrar_comprobantes(cliente_api: TestClient, sesion: Session) -> None:
+    """Declarar el pago es del vendedor, que es quien estuvo en la ferretería."""
+    usuario = Usuario(email="b@test.cl", nombre="B", rol="bodega", password_hash=hashear("x"))
     sesion.add(usuario)
     sesion.flush()
-    auth = {"Authorization": f"Bearer {emitir_token(usuario.uuid, 'cliente')}"}
+    auth = {"Authorization": f"Bearer {emitir_token(usuario.uuid, 'bodega')}"}
 
     r = cliente_api.post(f"{PREFIJO}/comprobantes", json=_payload(), headers=auth)
 

@@ -33,7 +33,7 @@ from dvu.almacenamiento import (
 )
 from dvu.api.deps import SessionDep, UsuarioDep, exige_rol
 from dvu.db.models import Cliente, Pago, PagoAplicacion, Pedido, Usuario
-from dvu.domain.roles import ADMIN, CLIENTE, VENDEDOR
+from dvu.domain.roles import ADMIN, VENDEDOR
 
 router = APIRouter(prefix="/pagos", tags=["pagos"])
 
@@ -97,7 +97,7 @@ class CambioEstadoPago(BaseModel):
 def declarar(
     entrada: PagoEntrada,
     session: SessionDep,
-    usuario: Annotated[Usuario, Depends(exige_rol(VENDEDOR, CLIENTE))],
+    usuario: Annotated[Usuario, Depends(exige_rol(VENDEDOR))],
 ) -> PagoOut:
     if entrada.metodo not in METODOS:
         raise HTTPException(
@@ -132,7 +132,7 @@ def declarar(
 def subir_comprobante(
     pago_uuid: uuid_lib.UUID,
     session: SessionDep,
-    usuario: Annotated[Usuario, Depends(exige_rol(VENDEDOR, CLIENTE))],
+    usuario: Annotated[Usuario, Depends(exige_rol(VENDEDOR))],
     almacen: AlmacenDep,
     archivo: Annotated[UploadFile, File(description="Foto o PDF de la transferencia")],
 ) -> PagoOut:
@@ -182,10 +182,6 @@ def listar(
     # consulta sólo se acotaba para el rol `vendedor`, así que cualquier otro rol veía
     # todos los pagos con su monto y su cliente.
     #
-    # `cliente` queda fuera y no acotado: no existe vínculo usuario↔cliente en el modelo
-    # —lo dice `/pedido` al elegir dónde guarda su lista— así que no hay con qué
-    # limitarlo a lo suyo. Dejarlo entrar sin ese vínculo es mostrarle los pagos de las
-    # demás ferreterías; cuando el vínculo exista, este es el lugar.
     usuario: Annotated[Usuario, Depends(exige_rol(VENDEDOR))],
     estado: Annotated[str | None, Query(description="declarado, verificado, …")] = None,
     cliente_rut: Annotated[str | None, Query()] = None,

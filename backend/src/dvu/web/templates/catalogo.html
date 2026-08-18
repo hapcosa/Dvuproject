@@ -413,8 +413,8 @@ if (enlace) abrirFicha(enlace);
  * algo tenía que irse a /pedido, perder la búsqueda y encontrar el producto de nuevo.
  */
 
-/** Sólo el que va a comprar. El administrador no arma pedidos, y al que mira sin entrar
- *  se le ofrece la puerta en la barra de arriba en vez de un botón que falla. */
+/** Sólo el vendedor. El administrador y el editor no arman pedidos, y al que mira sin
+ *  entrar se le ofrece la puerta en la barra de arriba en vez de un botón que falla. */
 let puedePedir = false;
 
 function pedir(sku, cuantos) {
@@ -425,7 +425,7 @@ function pedir(sku, cuantos) {
 async function prepararCarrito() {
   // `quienSoy` no tira si el token está viejo: el catálogo se mira igual sin entrar.
   const usuario = await DVU.quienSoy();
-  if (!usuario || !["vendedor", "cliente"].includes(usuario.rol)) return;
+  if (usuario?.rol !== "vendedor") return;
 
   puedePedir = true;
   document.getElementById("th-pedir").hidden = false;
@@ -436,7 +436,7 @@ async function prepararCarrito() {
     textoEnviar: "Revisar y enviar",
     errores: true,
   });
-  await DVU.carrito.montar(usuario);
+  await DVU.carrito.montar();
   // Lo que ya está en la lista se marca en la tabla: agregar dos veces el mismo codo
   // sin notarlo es el error que esta página tiene que hacer difícil.
   DVU.carrito.alCambiar(marcarPuestos);
