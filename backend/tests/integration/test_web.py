@@ -225,6 +225,26 @@ def test_la_huella_cambia_cuando_cambia_el_archivo(tmp_path: Path) -> None:
     assert len(antes) == 12
 
 
+def test_el_atributo_hidden_le_gana_al_display(cliente_api: TestClient) -> None:
+    """Sin esto, esconder algo con `hidden` no lo esconde.
+
+    La hoja del navegador trae `[hidden] { display: none }`, pero cualquier `display:` de
+    `dvu.css` le gana por ser CSS de autor. Le bastó `display: flex` al panel del carrito
+    para quedar visible para siempre tapando el catálogo, con el JS poniéndole
+    `hidden = true` correctamente: se veía clavado y «minimizar» parecía no existir.
+
+    Se comprueba acá y no en los tests de navegador porque jsdom aplica `hidden` con más
+    fuerza de la que le toca —responde `none` donde un navegador responde `flex`— y daría
+    el visto bueno a esa misma pantalla rota. Sobre el texto de la hoja la respuesta es
+    determinista.
+    """
+    css = cliente_api.get("/estatico/dvu.css").text
+
+    assert re.search(r"\[hidden\]\s*\{[^}]*display:\s*none\s*!important", css), (
+        "falta la regla global `[hidden] { display: none !important }`"
+    )
+
+
 def test_los_estaticos_se_sirven(cliente_api: TestClient) -> None:
     css = cliente_api.get("/estatico/dvu.css")
     js = cliente_api.get("/estatico/dvu.js")

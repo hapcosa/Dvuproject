@@ -18,7 +18,14 @@ grande de `/pedido`— y el estado llegaba a una y no a la otra. El objeto siemp
 bien; lo que fallaba era lo que se veía. Por eso estos tests miran el DOM.
 
 Se carga **el mismo `dvu.js` que sirve el servidor**, no una copia, sobre un DOM real
-(jsdom). Un error de sintaxis lo dicen acá y no el navegador de la oficina.
+(jsdom), y con **la hoja de estilos real aplicada**. Un error de sintaxis lo dicen acá y
+no el navegador de la oficina.
+
+El CSS importa tanto como el JS: `.carrito { display: flex }` le ganaba al atributo
+`hidden` y dejaba el panel visible para siempre, con el JS escondiéndolo correctamente.
+Cualquier test que mirara el atributo pasaba mientras en pantalla el panel seguía clavado.
+Por eso `seVe()` mira el estilo calculado, y por eso **jsdom va pineado a `^30`**: la 26 no
+implementa `!important` en el cascade y daría el visto bueno a esa misma pantalla rota.
 
 ## Las dos reglas
 

@@ -81,7 +81,8 @@ const ESQUELETO_PEDIDO = `
 /** Levanta una página con el carrito montado y sesión de vendedor iniciada. */
 export async function abrirPagina({ conPedido = false, ruta = "/" } = {}) {
   const dom = new JSDOM(
-    `<!doctype html><html><head><meta name="dvu-api" content="${API}"></head>
+    `<!doctype html><html><head><meta name="dvu-api" content="${API}">
+     <style>${readFileSync(`${WEB}/static/dvu.css`, "utf8")}</style>
      <body>
        <nav class="nav"><span id="sesion"></span></nav>
        <main class="hoja">${conPedido ? ESQUELETO_PEDIDO : ""}</main>
@@ -148,3 +149,20 @@ export async function abrirPagina({ conPedido = false, ruta = "/" } = {}) {
 export const calma = (ms = 1400) => new Promise((r) => setTimeout(r, ms));
 
 export const texto = (doc, id) => (doc.getElementById(id)?.textContent || "").trim();
+
+/** ¿Se ve? Mira el estilo calculado, con la hoja real aplicada.
+ *
+ *  **Lo que esto NO prueba:** que `hidden` gane sobre el `display:` del CSS. jsdom aplica
+ *  el `hidden` del navegador con más fuerza de la que le corresponde y responde `none`
+ *  donde un navegador de verdad responde `flex`. Con `.carrito { display: flex }` el panel
+ *  quedaba visible para siempre en pantalla y jsdom decía que estaba escondido, en la 26 y
+ *  en la 30. Esa conflicto lo cuida `test_el_atributo_hidden_le_gana_al_display` en
+ *  pytest, mirando la hoja misma, que es donde la respuesta es determinista.
+ *
+ *  Sirve igual: cubre que ninguna **otra** regla lo esconda, y es más que mirar el
+ *  atributo a secas. */
+export function seVe(w, id) {
+  const el = w.document.getElementById(id);
+  if (!el) return false;
+  return w.getComputedStyle(el).display !== "none";
+}

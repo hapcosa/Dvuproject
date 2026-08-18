@@ -27,6 +27,19 @@
 
 * { box-sizing: border-box; }
 
+/* El atributo `hidden` gana siempre.
+ *
+ * La hoja del navegador trae `[hidden] { display: none }`, pero cualquier `display:` de
+ * acá le gana por ser CSS de autor. Basta con darle `display: flex` a un elemento que se
+ * esconde con `hidden` —el panel del carrito, su botón, la tira de portadas— para que
+ * quede visible para siempre y el JS que lo esconde no haga nada visible. Pasó con el
+ * carrito: se veía clavado tapando el catálogo y «minimizar» parecía no existir, mientras
+ * el JS ponía `hidden = true` correctamente.
+ *
+ * Toda la web esconde cosas con `hidden`, así que la regla va acá arriba y no en cada
+ * componente: el próximo `display:` que alguien escriba no puede volver a romperlo. */
+[hidden] { display: none !important; }
+
 body {
   margin: 0;
   background: var(--fondo);

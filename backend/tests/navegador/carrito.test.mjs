@@ -9,7 +9,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { abrirPagina, calma, hayStack, texto, RAZON_SALTO } from "./ayuda.mjs";
+import { abrirPagina, calma, hayStack, seVe, texto, RAZON_SALTO } from "./ayuda.mjs";
 
 const saltar = !(await hayStack());
 const opciones = { skip: saltar ? RAZON_SALTO : false };
@@ -70,8 +70,9 @@ test("minimizar corre el panel sin perder la lista", opciones, async () => {
     p.carrito.agregar(productos[0], 2);
 
     p.carrito.abrirDrawer(true);
+    assert.ok(seVe(p.w, "carrito"), "el panel se ve");
     assert.ok(
-      p.doc.getElementById("carrito-boton").hidden,
+      !seVe(p.w, "carrito-boton"),
       "abierto el panel, el botón flotante se esconde: no hay dos veces la misma cuenta",
     );
     assert.ok(
@@ -81,14 +82,14 @@ test("minimizar corre el panel sin perder la lista", opciones, async () => {
 
     p.doc.getElementById("carrito-minimizar").click();
 
-    assert.ok(p.doc.getElementById("carrito").hidden, "minimizar esconde el panel");
-    assert.ok(!p.doc.getElementById("carrito-boton").hidden, "y devuelve el botón");
+    assert.ok(!seVe(p.w, "carrito"), "minimizar esconde el panel de verdad");
+    assert.ok(seVe(p.w, "carrito-boton"), "y devuelve el botón");
     assert.ok(!p.w.document.body.classList.contains("con-carrito"), "la hoja se recupera");
     assert.equal(p.carrito.lista.lineas.length, 1, "la lista queda intacta");
     assert.equal(texto(p.doc, "carrito-cuenta"), "1", "con la cuenta al día");
 
     p.doc.getElementById("carrito-boton").click();
-    assert.ok(!p.doc.getElementById("carrito").hidden, "el botón la vuelve a abrir");
+    assert.ok(seVe(p.w, "carrito"), "el botón la vuelve a abrir");
   } finally {
     await p.limpiar();
   }
@@ -107,7 +108,7 @@ test("agregar desde el catálogo no abre el panel encima", opciones, async () =>
 
     await p.carrito.agregarDesdeCatalogo(productos[0], 1);
     assert.ok(
-      p.doc.getElementById("carrito").hidden,
+      !seVe(p.w, "carrito"),
       "minimizado se queda minimizado: el panel se abre para mirar la lista, no para sumarle",
     );
     assert.ok(p.carrito.enLista(productos[0].sku), "pero el producto entró");
@@ -130,7 +131,7 @@ test("sin lista abierta, agregar pide la ferretería y no pierde el producto", o
     p.carrito.abrirDrawer(false);
 
     await p.carrito.agregarDesdeCatalogo(productos[1], 1);
-    assert.ok(!p.doc.getElementById("carrito").hidden, "acá sí se abre: falta elegir a quién");
+    assert.ok(seVe(p.w, "carrito"), "acá sí se abre: falta elegir a quién");
     assert.ok(p.doc.getElementById("carrito-cliente"), "con el selector");
 
     p.doc.getElementById("carrito-cliente").value = clientes[0].rut;
