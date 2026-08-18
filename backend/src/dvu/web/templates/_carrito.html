@@ -21,7 +21,10 @@
       <h2>La lista</h2>
       <p class="pista" id="carrito-para"></p>
     </div>
-    <button type="button" class="cerrar" id="carrito-cerrar" aria-label="Cerrar">×</button>
+    {# Minimizar, no cerrar: la lista no se pierde ni se descarta, se corre para dejar ver
+       el catálogo. Cerrarla del todo no existe porque no significaría nada distinto. #}
+    <button type="button" class="cerrar" id="carrito-minimizar"
+            title="Minimizar" aria-label="Minimizar la lista">−</button>
   </header>
 
   <div class="aviso error" id="carrito-error" hidden></div>
@@ -37,6 +40,9 @@
   </footer>
 </aside>
 
-{# El fondo oscuro del drawer abierto. No es un `<dialog>`: en el catálogo se sigue
-   buscando con el drawer abierto, así que no puede volverse modal ni robar el foco. #}
+{# El fondo oscuro existe **sólo en el celular**, donde el drawer ocupa la pantalla entera
+   y no hay nada detrás que mirar. En el computador el drawer es un panel al costado y no
+   un modal: se sigue buscando y mirando fotos con él abierto, así que oscurecer el
+   catálogo era tapar justo lo que el vendedor está mostrando. Lo apaga el CSS por ancho;
+   acá siempre está, para que el JS no tenga que saber en qué pantalla corre. #}
 <div class="carrito-fondo" id="carrito-fondo" hidden></div>

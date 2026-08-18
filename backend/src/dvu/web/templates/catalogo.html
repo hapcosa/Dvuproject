@@ -433,6 +433,7 @@ async function prepararCarrito() {
   DVU.carrito.montarDrawer({
     alVerCompleta: () => { location.href = "/pedido"; },
     alEnviar: () => { location.href = "/pedido"; },
+    textoEnviar: "Revisar y enviar",
     errores: true,
   });
   await DVU.carrito.montar(usuario);

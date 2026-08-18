@@ -673,6 +673,15 @@ table.editable .edit.guardado { background: #dcfce7; border-left-color: var(--ve
   border-bottom: 1px solid var(--gris-borde);
 }
 .lista-guardada:last-child { border-bottom: 0; }
+/* La que se está armando: con cinco ferreterías abiertas y todas iguales, no había cómo
+   saber a cuál le entra lo que se agrega. */
+.lista-guardada.abierta {
+  margin: 0 -10px;
+  padding-inline: 10px;
+  background: #f0f7ff;
+  border-left: 3px solid var(--azul);
+}
+.lista-guardada.abierta strong { color: var(--azul-oscuro); }
 .lista-guardada .pista { margin: 2px 0 0; }
 
 /* El contador de envases. Los botones son grandes a propósito: esto se usa de pie, con
@@ -820,6 +829,17 @@ dialog.ingreso .pista.dev {
   cursor: pointer;
 }
 .carrito-boton:hover { background: var(--rojo-oscuro); }
+
+/* El acuse de recibo cuando se agrega con el panel minimizado. */
+@keyframes carrito-late {
+  0%   { transform: scale(1); }
+  35%  { transform: scale(1.14); }
+  100% { transform: scale(1); }
+}
+.carrito-boton.late { animation: carrito-late 320ms ease-out; }
+@media (prefers-reduced-motion: reduce) {
+  .carrito-boton.late { animation: none; }
+}
 .carrito-boton .icono { font-size: 17px; }
 .carrito-boton .cuenta {
   min-width: 22px;
@@ -829,12 +849,10 @@ dialog.ingreso .pista.dev {
   font-size: 12px;
 }
 
-.carrito-fondo {
-  position: fixed;
-  inset: 0;
-  z-index: 45;
-  background: rgb(15 23 42 / 35%);
-}
+/* El fondo oscuro es de celular y nada más: ahí el drawer ocupa la pantalla entera. En
+   el computador oscurecer el catálogo tapaba la foto que el vendedor está mostrando, y
+   además tragaba los clics de la tabla —el panel es un costado, no un modal—. */
+.carrito-fondo { display: none; }
 
 .carrito {
   position: fixed;
@@ -973,9 +991,27 @@ dialog.ingreso .pista.dev {
 .col-pedir .agregar { padding: 6px 12px; font-size: 13px; }
 .col-pedir .puesta { display: block; margin-top: 4px; font-size: 11px; }
 
+/* Con el drawer abierto la hoja se corre y deja de quedar debajo: si no, el panel tapa
+   la columna del precio y la de pedir, que son las dos que se están mirando. Cuando no
+   cabe correrse —pantalla angosta— manda la regla del celular de más abajo. */
+@media (min-width: 721px) {
+  body.con-carrito .hoja,
+  body.con-carrito .nav,
+  body.con-carrito .pie { margin-right: 400px; }
+}
+
 @media (max-width: 720px) {
   .carrito { width: 100vw; }
   .carrito-boton { right: 12px; bottom: 12px; }
+  /* Acá sí: a pantalla completa no hay nada detrás que valga la pena ver, y el fondo
+     deja claro que el resto está en pausa. */
+  body.con-carrito .carrito-fondo {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 45;
+    background: rgb(15 23 42 / 45%);
+  }
   /* En el celular la fila del catálogo ya esconde marca y medida; el botón cabe
      igual porque es lo que se viene a hacer. */
   .col-pedir { width: 64px; }

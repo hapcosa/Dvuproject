@@ -75,6 +75,11 @@ const DVU = (() => {
   function cerrarSesion() {
     sessionStorage.removeItem(CLAVE);
     sessionStorage.removeItem(CLAVE_REFRESH);
+    // La lista se va con la sesión. En el computador compartido de la bodega, salir y
+    // que el siguiente encuentre abierta la lista a medias de otra ferretería es
+    // exactamente lo que el token en sessionStorage estaba evitando.
+    sessionStorage.removeItem(CLAVE_ACTIVA);
+    sessionStorage.removeItem(CLAVE_LOCAL);
     quienEntro = null;
   }
 
@@ -575,6 +580,11 @@ const DVU = (() => {
     carrito.lista = aLista(borrador);
     carrito.cotizado = new Map();
     carrito.totales = { ...SIN_TOTALES };
+    // Elegir ferretería terminó: ya hay una. Se apaga acá y no en el botón del drawer
+    // porque la lista también nace desde fuera —«+ Nueva lista» y «Repetir» en /pedido—,
+    // y en esos casos el drawer se quedaba mostrando el selector como si no hubiera nada
+    // elegido, con la lista recién creada abierta detrás.
+    eligiendoCliente = false;
     if (carrito.almacen.guardaVarias) sessionStorage.setItem(CLAVE_ACTIVA, carrito.lista.client_uuid);
     marcarGuardado("Guardado", "ok");
     cotizarPronto();
@@ -824,33 +834,45 @@ const DVU = (() => {
       document.getElementById("carrito-enviar").disabled = Boolean(carrito.totales.con_problema);
     }
 
-    // El botón flotante sólo aparece con algo adentro: vacío sería un adorno que tapa.
-    boton.hidden = !lineas.length;
+    // El botón flotante sólo aparece con algo adentro —vacío sería un adorno que tapa— y
+    // sólo con el panel minimizado: abierto, serían dos veces la misma cuenta.
+    boton.hidden = !lineas.length || !caja.hidden;
     document.getElementById("carrito-cuenta").textContent = lineas.length;
     document.getElementById("carrito-monto").textContent = lineas.length
       ? pesos(carrito.totales.total_clp)
       : "";
   }
 
+  /** Abre o minimiza el panel. Minimizar no pierde nada: la lista queda igual y el botón
+   *  flotante la trae de vuelta. `con-carrito` en el body es lo que corre la hoja para
+   *  que el panel no quede encima de la tabla. */
   const abrirDrawer = (abierto) => {
     const caja = document.getElementById("carrito");
     if (!caja) return;
     caja.hidden = !abierto;
     document.getElementById("carrito-fondo").hidden = !abierto;
+    document.body.classList.toggle("con-carrito", abierto);
     document.getElementById("carrito-boton").setAttribute("aria-expanded", String(abierto));
-    if (abierto) pintarDrawer();
+    // También al minimizar: es cuando reaparece el botón flotante con la cuenta al día.
+    pintarDrawer();
   };
   carrito.abrirDrawer = abrirDrawer;
+  const drawerAbierto = () => {
+    const caja = document.getElementById("carrito");
+    return Boolean(caja) && !caja.hidden;
+  };
 
   /** Engancha el drawer al DOM de la página. `alVerCompleta` es lo que hace «Ver
    *  completa»: en /pedido baja a la tarjeta grande, en el catálogo navega a /pedido. */
-  carrito.montarDrawer = function ({ alVerCompleta, alEnviar, errores = false } = {}) {
+  carrito.montarDrawer = function (
+    { alVerCompleta, alEnviar, errores = false, textoEnviar = "" } = {}
+  ) {
     const caja = document.getElementById("carrito");
     if (!caja) return;
     muestraErrores = errores;
 
     document.getElementById("carrito-boton").onclick = () => abrirDrawer(caja.hidden);
-    document.getElementById("carrito-cerrar").onclick = () => abrirDrawer(false);
+    document.getElementById("carrito-minimizar").onclick = () => abrirDrawer(false);
     document.getElementById("carrito-fondo").onclick = () => abrirDrawer(false);
     document.addEventListener("keydown", (e) => {
       if (e.key === "Escape" && !caja.hidden) abrirDrawer(false);
@@ -858,7 +880,12 @@ const DVU = (() => {
 
     document.getElementById("carrito-ver").onclick = () =>
       alVerCompleta ? alVerCompleta() : (location.href = "/pedido");
-    document.getElementById("carrito-enviar").onclick = () => alEnviar?.();
+
+    // En el catálogo el botón lleva a revisar, porque enviar de verdad pide confirmar y
+    // arreglar líneas, y eso vive en /pedido. Decir «Enviar» y navegar sería mentir.
+    const enviarBoton = document.getElementById("carrito-enviar");
+    if (textoEnviar) enviarBoton.textContent = textoEnviar;
+    enviarBoton.onclick = () => alEnviar?.();
 
     caja.addEventListener("click", async (e) => {
       const boton = e.target.closest("button");
@@ -904,7 +931,12 @@ const DVU = (() => {
    *
    *  Sin lista abierta no se pierde el producto ni se inventa un cliente: se abre el
    *  drawer en el selector y, apenas se elige la ferretería, entra lo que se quería
-   *  agregar. Perder el clic obligaría a buscar el producto de nuevo. */
+   *  agregar. Perder el clic obligaría a buscar el producto de nuevo.
+   *
+   *  Con lista abierta **no se abre el panel**. Abrirlo en cada «Agregar» tapaba la foto
+   *  y la fila que el vendedor le está mostrando al ferretero, justo mientras dicta: el
+   *  panel se abre cuando se quiere mirar la lista, no cuando se le suma algo. La
+   *  confirmación la da el botón flotante, que late y trae la cuenta al día. */
   let pendiente = null;
   carrito.agregarDesdeCatalogo = async function (producto, cuantos = 1) {
     if (!carrito.lista) {
@@ -914,9 +946,19 @@ const DVU = (() => {
       return null;
     }
     const linea = carrito.agregar(producto, cuantos);
-    abrirDrawer(true);
+    if (!drawerAbierto()) latir();
     return linea;
   };
+
+  /** El latido del botón flotante: es el acuse de recibo cuando el panel está minimizado.
+   *  Sin él, agregar con el panel cerrado no se ve por ninguna parte. */
+  function latir() {
+    const boton = document.getElementById("carrito-boton");
+    if (!boton) return;
+    boton.classList.remove("late");
+    void boton.offsetWidth; // reinicia la animación si se agrega dos veces seguidas
+    boton.classList.add("late");
+  }
 
   carrito.alCambiar(() => {
     if (pendiente && carrito.lista && !eligiendoCliente) {

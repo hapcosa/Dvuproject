@@ -129,6 +129,28 @@ def test_el_carrito_va_en_el_catalogo_y_en_pedido(cliente_api: TestClient, ruta:
     assert 'id="carrito-boton"' in html
 
 
+def test_el_carrito_se_minimiza_y_no_se_cierra(cliente_api: TestClient) -> None:
+    """Minimizar corre el panel; la lista no se pierde ni se descarta.
+
+    El panel tapaba la foto y la fila que el vendedor le está mostrando al ferretero.
+    Cerrarlo del todo no existe porque no significaría nada distinto de minimizarlo.
+    """
+    html = cliente_api.get("/").text
+
+    assert 'id="carrito-minimizar"' in html
+    assert 'id="carrito-cerrar"' not in html
+
+
+def test_el_carrito_no_oscurece_el_catalogo_en_pantalla_ancha(cliente_api: TestClient) -> None:
+    """El panel es un costado, no un modal: se sigue buscando y mirando fotos con él
+    abierto. El fondo oscuro queda sólo para el celular, donde ocupa la pantalla entera."""
+    css = cliente_api.get("/estatico/dvu.css").text
+
+    assert ".carrito-fondo { display: none; }" in css
+    # Y la hoja se corre para que el panel no quede encima de la tabla.
+    assert "con-carrito" in css
+
+
 def test_el_carrito_no_se_cuela_donde_no_se_pide(cliente_api: TestClient) -> None:
     """Cobranza y administración no arman pedidos; un carrito ahí es un adorno que tapa."""
     for ruta in ["/admin", "/cobranza", "/vendedor", "/ingresar"]:

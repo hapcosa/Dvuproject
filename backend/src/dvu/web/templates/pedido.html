@@ -183,7 +183,6 @@ const $ = (id) => document.getElementById(id);
 
 function abrir(borrador) {
   carrito.abrir(borrador);
-  mostrarConstructor();
   buscar();
   $("q").focus();
 }
@@ -195,23 +194,29 @@ function mostrarConstructor() {
   if (!hay) return void (avisoLista.hidden = true);
   $("titulo-lista").textContent = carrito.lista.cliente_razon_social;
   $("sub-lista").textContent = `RUT ${carrito.lista.cliente_rut}`;
-  $("observaciones").value = carrito.lista.observaciones;
+  // Sólo si cambió: asignar `.value` manda el cursor al final, y esto corre en cada
+  // cambio del carrito —o sea, en cada tecla que se escribe justo en este campo—.
+  if ($("observaciones").value !== carrito.lista.observaciones) {
+    $("observaciones").value = carrito.lista.observaciones;
+  }
 }
 
 function cerrar() {
   carrito.cerrar();
-  mostrarConstructor();
-  cargarListas();
 }
 
 /** Lo que el carrito cambió —desde acá, desde el drawer o desde el catálogo— se pinta en
  *  la tabla grande. Una sola suscripción: no hay que acordarse de repintar en cada sitio
- *  donde se toca una cantidad. */
+ *  donde se toca una cantidad.
+ *
+ *  Incluido qué tarjetas se ven: la lista también nace y muere desde el drawer, y
+ *  colgarlo de cada sitio que la crea dejaba el constructor escondido con una lista
+ *  abierta detrás. */
 carrito.alCambiar(() => {
+  mostrarConstructor();
+  pintarListas();
   dibujarLineas();
-  // Sólo si ya se buscó: sin esto la tabla de resultados diría «Sin resultados» al
-  // cargar, antes de que nadie haya escrito nada.
-  if (buscado) dibujarResultados();
+  marcarPuestos();
   marcarGuardado(carrito.estadoGuardado, carrito.claseGuardado);
   if (carrito.error) {
     DVU.avisar(mensaje, carrito.error, "error");
@@ -322,7 +327,6 @@ $("observaciones").oninput = () => {
 
 let pagina = { items: [], total: 0 };
 let desde = 0;
-let buscado = false;
 const POR_PAGINA = 25;
 
 async function buscar(acumular = false) {
@@ -343,7 +347,6 @@ async function buscar(acumular = false) {
       ? { items: pagina.items.concat(respuesta.items), total: respuesta.total }
       : respuesta;
     desde = pagina.items.length;
-    buscado = true;
     dibujarResultados();
   } catch (e) {
     cuerpo.innerHTML = `<tr><td colspan="6">${DVU.escapar(e.message)}</td></tr>`;
@@ -394,6 +397,24 @@ function dibujarResultados() {
     ? `<button type="button" class="plano" id="ver-mas">Ver ${Math.min(faltan, POR_PAGINA)} más
          (de ${pagina.total} en total)</button>`
     : `<p class="pista">${pagina.total} resultado${pagina.total === 1 ? "" : "s"}.</p>`;
+}
+
+/** Refresca sólo la pastilla de «ya va en la lista» de cada resultado.
+ *
+ *  Y no un `dibujarResultados()` entero: eso rehace los `<input>` de envases y borra la
+ *  cantidad que el vendedor acaba de tipear. Corre en cada cambio del carrito —incluida
+ *  la respuesta de la cotización, que llega sola 300 ms después— así que el número se
+ *  volvía 1 sin que nadie lo tocara. */
+function marcarPuestos() {
+  $("resultados").querySelectorAll("tr[data-sku]").forEach((fila) => {
+    const puesto = carrito.enLista(fila.dataset.sku);
+    const celda = fila.children[1];
+    const pastilla = celda.querySelector(".puesta");
+    if (!puesto) return pastilla?.remove();
+    const texto = `${envases(puesto)} en la lista`;
+    if (pastilla) return void (pastilla.textContent = texto);
+    celda.insertAdjacentHTML("beforeend", `<br><span class="pastilla puesta">${texto}</span>`);
+  });
 }
 
 $("mas").onclick = (evento) => {
@@ -460,7 +481,6 @@ $("confirmar-si").onclick = async () => {
     mensaje.append(" ", compartir);
 
     DVU.carrito.abrirDrawer(false);
-    mostrarConstructor();
     cargarListas();
     cargarMios();
   } catch (e) {
@@ -483,7 +503,6 @@ $("descartar").onclick = async () => {
   try {
     await carrito.descartar();
     DVU.avisar(mensaje, "Lista descartada.", "info");
-    mostrarConstructor();
     cargarListas();
   } catch (e) {
     DVU.avisar(mensaje, e.message, "error");
@@ -492,27 +511,38 @@ $("descartar").onclick = async () => {
 
 /* --- el panel de listas --------------------------------------------------- */
 
-async function cargarListas() {
+/** Trae las listas del servidor. Repintar es cosa de `pintarListas`, que corre suscrito
+ *  al carrito: así el panel también se pone al día cuando el guardado automático las
+ *  refresca por su cuenta, sin que nadie llame a nada. */
+const cargarListas = () => carrito.refrescarBorradores();
+
+function pintarListas() {
   if (!carrito.almacen.guardaVarias) return;
   const caja = $("listas");
-  const borradores = await carrito.refrescarBorradores();
+  const borradores = carrito.borradores;
   caja.innerHTML = borradores.length
     ? borradores
-        .map(
-          (b) => `
-      <div class="lista-guardada" data-uuid="${b.client_uuid}">
+        .map((b) => {
+          // Cuál se está armando. Con cinco ferreterías abiertas y todas iguales, no
+          // había cómo saber a cuál le entra lo que se agrega.
+          const abierta = b.client_uuid === carrito.lista?.client_uuid;
+          return `
+      <div class="lista-guardada ${abierta ? "abierta" : ""}" data-uuid="${b.client_uuid}">
         <div>
           <strong>${DVU.escapar(b.cliente_razon_social)}</strong>
+          ${abierta ? '<span class="pastilla puesta">armando</span>' : ""}
           <p class="pista">
             ${b.lineas.length} línea${b.lineas.length === 1 ? "" : "s"} ·
             ${DVU.pesos(b.total_clp)} · ${cuando(b.actualizado_en)}
           </p>
         </div>
         <div class="acciones">
-          <button type="button" class="abrir">Abrir</button>
+          ${abierta
+            ? '<button type="button" class="plano ir">Ir a la lista</button>'
+            : '<button type="button" class="abrir">Abrir</button>'}
         </div>
-      </div>`
-        )
+      </div>`;
+        })
         .join("")
     : '<p class="pista">No tienes listas abiertas. Empieza una acá abajo.</p>';
   caja._borradores = borradores;
@@ -530,6 +560,9 @@ function cuando(iso) {
 }
 
 $("listas").onclick = (evento) => {
+  if (evento.target.classList.contains("ir")) {
+    return $("constructor").scrollIntoView({ behavior: "smooth" });
+  }
   if (!evento.target.classList.contains("abrir")) return;
   const uuid = evento.target.closest("[data-uuid]").dataset.uuid;
   abrir($("listas")._borradores.find((b) => b.client_uuid === uuid));
@@ -545,11 +578,9 @@ $("form-nueva").onsubmit = async (evento) => {
   }
   try {
     await carrito.crear(cliente);
-    mostrarConstructor();
     buscar();
     $("q").focus();
     $("cliente-nuevo").value = "";
-    cargarListas();
   } catch (e) {
     DVU.avisar(mensaje, e.message, "error");
   }
@@ -679,7 +710,6 @@ $("mios").onclick = async (evento) => {
     // la cotización marca la línea y el vendedor decide: corregirla en silencio sería
     // cambiarle el pedido al cliente sin decirle.
     await carrito.crear(cliente, pedido.lineas);
-    mostrarConstructor();
     buscar();
     DVU.avisar(mensaje, `Lista armada con lo del pedido ${pedido.numero}. Revísala y envíala.`, "ok");
   } catch (e) {
@@ -716,8 +746,8 @@ DVU.proteger({
     cargarMios();
     await cargarListas();
 
-    // `montar` ya retomó la lista activa —la que quedó abierta acá o en el catálogo—.
-    mostrarConstructor();
+    // `montar` ya retomó la lista activa —la que quedó abierta acá o en el catálogo— y
+    // con ella la suscripción dejó las tarjetas como corresponde.
     if (carrito.lista) buscar();
   },
 });
