@@ -51,6 +51,7 @@ def version_estaticos() -> str:
             marcas.append("0")
     return sha256("|".join(marcas).encode()).hexdigest()[:12]
 
+
 PAGINAS = {
     "/": ("catalogo.html", "Catálogo"),
     "/ingresar": ("ingresar.html", "Ingresar"),

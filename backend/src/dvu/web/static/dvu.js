@@ -26,13 +26,15 @@ const DVU = (() => {
 
   //: Qué rol abre qué página. Vive acá y no en cada plantilla porque se usa en dos
   //: lados —el aviso de «esta página no es para tu cuenta» y los atajos que ofrece— y
-  //: dos copias se desincronizan. `admin` entra a todas, igual que en `exige_rol`.
+  //: dos copias se desincronizan. `admin` entra a todas, igual que en `exige_rol`, así
+  //: que `["editor"]` se lee «editor o administrador». La lista de roles del negocio
+  //: está en `dvu.domain.roles`; acá sólo vive qué página abre cuál.
   const PAGINAS = [
     { ruta: "/", nombre: "Catálogo", roles: null },
     { ruta: "/pedido", nombre: "Armar pedido", roles: ["vendedor", "cliente"] },
     { ruta: "/vendedor", nombre: "Comprobantes", roles: ["vendedor"] },
     { ruta: "/cobranza", nombre: "Cobranza", roles: ["admin"] },
-    { ruta: "/admin", nombre: "Administrar catálogo", roles: ["admin"] },
+    { ruta: "/admin", nombre: "Administrar catálogo", roles: ["editor"] },
   ];
 
   const alcanza = (rol, roles) => !roles || rol === "admin" || roles.includes(rol);

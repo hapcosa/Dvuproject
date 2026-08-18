@@ -245,6 +245,25 @@ def test_el_atributo_hidden_le_gana_al_display(cliente_api: TestClient) -> None:
     )
 
 
+def test_la_pantalla_de_usuarios_nace_oculta(cliente_api: TestClient) -> None:
+    """La muestra el JS sólo para `admin`. El editor entra a /admin a mantener el
+    catálogo y no tiene por qué ver el reparto de accesos; quien lo cierra de verdad es
+    el servidor, que le responde 403 a `/usuarios`."""
+    html = cliente_api.get("/admin").text
+
+    assert 'id="panel-usuarios" hidden' in html
+    assert 'id="form-usuario"' in html
+
+
+def test_admin_lo_abre_el_editor_tambien(cliente_api: TestClient) -> None:
+    """`alcanza()` deja pasar a `admin` siempre, igual que `exige_rol`, así que
+    `["editor"]` se lee «editor o administrador». Si esto dijera `["admin"]`, el editor
+    vería «esta página no es para tu cuenta» sobre la página que sí le toca."""
+    js = cliente_api.get("/estatico/dvu.js").text
+
+    assert 'ruta: "/admin", nombre: "Administrar catálogo", roles: ["editor"]' in js
+
+
 def test_los_estaticos_se_sirven(cliente_api: TestClient) -> None:
     css = cliente_api.get("/estatico/dvu.css")
     js = cliente_api.get("/estatico/dvu.js")

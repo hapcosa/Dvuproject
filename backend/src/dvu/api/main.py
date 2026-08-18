@@ -23,6 +23,7 @@ from dvu.api.routers import (
     pedidos,
     productos,
     reportes,
+    usuarios,
 )
 from dvu.config import get_settings
 from dvu.web import router as web
@@ -77,6 +78,7 @@ def create_app() -> FastAPI:
         conciliacion.router,
         dte.router,
         reportes.router,
+        usuarios.router,
     ):
         app.include_router(router, prefix=cfg.api_prefix)
 

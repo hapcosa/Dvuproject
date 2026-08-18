@@ -118,6 +118,43 @@
     <span id="rango"></span>
     <button class="plano" id="siguiente">Siguiente ›</button>
   </div>
+
+  <!-- Usuarios. Sólo la administración: un editor mantiene el catálogo, y repartir
+       accesos es otra cosa. El JS la deja oculta para el rol `editor`; el servidor la
+       cierra igual, que es donde importa. -->
+  <section class="tarjeta" id="panel-usuarios" hidden>
+    <h2>Usuarios</h2>
+    <p class="pista">
+      Quién entra al sistema y con qué rol. Dar de alta a un vendedor nuevo se hacía
+      desde la consola de la base; acá lo hace la administración sola.
+    </p>
+
+    <div id="aviso-usuarios" hidden></div>
+
+    <div class="desplazable">
+      <table class="datos">
+        <thead>
+          <tr><th>Nombre</th><th>Correo</th><th>Rol</th><th>Estado</th><th></th></tr>
+        </thead>
+        <tbody id="usuarios"><tr><td colspan="5">Cargando…</td></tr></tbody>
+      </table>
+    </div>
+
+    <h3>Crear uno nuevo</h3>
+    <form class="filtros" id="form-usuario">
+      <div class="campo"><label for="u-nombre">Nombre</label>
+        <input id="u-nombre" required minlength="2" placeholder="María Pérez"></div>
+      <div class="campo"><label for="u-email">Correo</label>
+        <input id="u-email" type="email" required placeholder="maria@dvu.cl"></div>
+      <div class="campo"><label for="u-rol">Rol</label>
+        <select id="u-rol" required></select></div>
+      <div class="campo"><label for="u-password">Contraseña</label>
+        <input id="u-password" type="password" required minlength="10"
+               autocomplete="new-password" placeholder="mínimo 10 caracteres"></div>
+      <div class="acciones"><button type="submit" id="u-crear">Crear usuario</button></div>
+    </form>
+    <p class="pista" id="pista-rol"></p>
+  </section>
 </div>
 {% endblock %}
 
@@ -134,6 +171,9 @@ let version = 0;
 // El árbol completo, para pintar la lista de cada fila. Incluye las vacías: acá se
 // asigna, y una categoría recién creada empieza sin productos.
 let categorias = [];
+
+/** Mismo atajo que en /pedido: esta página toca muchos ids. */
+const $ = (id) => document.getElementById(id);
 
 const filas = document.getElementById("filas");
 const mensaje = document.getElementById("mensaje");
@@ -683,10 +723,132 @@ contenedorSecciones.addEventListener("submit", async (evento) => {
   }
 });
 
+/* --- usuarios -------------------------------------------------------------
+ *
+ * Sólo para `admin`. El editor entra a esta página a mantener el catálogo y no ve nada
+ * de esto; el servidor responde 403 igual, que es lo que de verdad lo cierra.
+ */
+
+const avisoUsuarios = $("aviso-usuarios");
+let rolesAsignables = [];
+
+/** Los roles salen del servidor con su descripción: quien reparte accesos elige por lo
+ *  que la persona va a hacer, no por el código. Reescribirlos acá sería una segunda
+ *  copia que se desactualiza. */
+async function cargarRoles() {
+  rolesAsignables = await DVU.pedir("/usuarios/roles");
+  $("u-rol").innerHTML = rolesAsignables
+    .map((r) => `<option value="${DVU.escapar(r.codigo)}">${DVU.escapar(r.codigo)}</option>`)
+    .join("");
+  explicarRol();
+}
+
+function explicarRol() {
+  const elegido = rolesAsignables.find((r) => r.codigo === $("u-rol").value);
+  $("pista-rol").textContent = elegido ? elegido.descripcion : "";
+}
+$("u-rol").onchange = explicarRol;
+
+async function cargarUsuarios() {
+  const cuerpo = $("usuarios");
+  try {
+    const gente = await DVU.pedir("/usuarios?incluir_inactivos=true");
+    cuerpo.innerHTML = gente
+      .map(
+        (u) => `
+      <tr data-uuid="${DVU.escapar(u.uuid)}" class="${u.activo ? "" : "inactiva"}">
+        <td>${DVU.escapar(u.nombre)}</td>
+        <td><code>${DVU.escapar(u.email)}</code></td>
+        <td><span class="pastilla">${DVU.escapar(u.rol)}</span></td>
+        <td>${u.activo ? "Activo" : "Desactivado"}</td>
+        <td class="acciones-fila">
+          <button type="button" class="plano clave">Cambiar contraseña</button>
+          ${u.rol === "admin"
+            ? ""
+            : `<button type="button" class="plano estado">${u.activo ? "Desactivar" : "Reactivar"}</button>`}
+        </td>
+      </tr>`
+      )
+      .join("");
+    cuerpo._gente = gente;
+  } catch (e) {
+    cuerpo.innerHTML = `<tr><td colspan="5">${DVU.escapar(e.message)}</td></tr>`;
+  }
+}
+
+$("form-usuario").onsubmit = async (evento) => {
+  evento.preventDefault();
+  const boton = $("u-crear");
+  boton.disabled = true;
+  try {
+    const creado = await DVU.pedir("/usuarios", {
+      method: "POST",
+      body: {
+        nombre: $("u-nombre").value.trim(),
+        email: $("u-email").value.trim(),
+        rol: $("u-rol").value,
+        password: $("u-password").value,
+      },
+    });
+    // La contraseña se dice una vez, acá, porque no hay correo de bienvenida todavía:
+    // quien crea la cuenta es quien se la pasa a la persona.
+    DVU.avisar(
+      avisoUsuarios,
+      `${creado.nombre} ya puede entrar con ${creado.email} y la contraseña que escribiste.`,
+      "ok"
+    );
+    $("form-usuario").reset();
+    explicarRol();
+    cargarUsuarios();
+  } catch (e) {
+    DVU.avisar(avisoUsuarios, e.message, "error");
+  } finally {
+    boton.disabled = false;
+  }
+};
+
+$("usuarios").onclick = async (evento) => {
+  const fila = evento.target.closest("tr[data-uuid]");
+  if (!fila) return;
+  const uuid = fila.dataset.uuid;
+  const quien = $("usuarios")._gente.find((u) => u.uuid === uuid);
+
+  if (evento.target.classList.contains("estado")) {
+    // Desactivar es lo más cerca de borrar que hay: sus pedidos y comprobantes lo
+    // apuntan, así que la fila se queda. Se pregunta igual.
+    if (quien.activo && !confirm(`¿Desactivar a ${quien.nombre}? No podrá entrar más.`)) return;
+    return cambiar(uuid, { activo: !quien.activo });
+  }
+  if (evento.target.classList.contains("clave")) {
+    const nueva = prompt(`Contraseña nueva para ${quien.nombre} (mínimo 10 caracteres):`);
+    if (!nueva) return;
+    return cambiar(uuid, { password: nueva }, "Contraseña cambiada.");
+  }
+};
+
+async function cambiar(uuid, cambios, mensajeOk = "") {
+  try {
+    await DVU.pedir(`/usuarios/${uuid}`, { method: "PATCH", body: cambios });
+    if (mensajeOk) DVU.avisar(avisoUsuarios, mensajeOk, "ok");
+    else avisoUsuarios.hidden = true;
+    cargarUsuarios();
+  } catch (e) {
+    DVU.avisar(avisoUsuarios, e.message, "error");
+  }
+}
+
 // El árbol primero: la tabla lo necesita para pintar la lista de cada fila.
 DVU.proteger({
-  rol: ["admin"],
-  alIngresar: () => cargarCategorias().then(cargar).then(cargarPaginas),
+  rol: ["editor"],
+  alIngresar: (quien) => {
+    // El editor mantiene el catálogo y nada más. Se esconde acá para no ofrecerle una
+    // pantalla que el servidor le va a negar; quien la cierra es el servidor.
+    if (quien.rol === "admin") {
+      $("panel-usuarios").hidden = false;
+      cargarRoles().then(cargarUsuarios).catch(() => {});
+    }
+    return cargarCategorias().then(cargar).then(cargarPaginas);
+  },
 });
 </script>
 {% endblock %}

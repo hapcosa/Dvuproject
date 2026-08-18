@@ -31,6 +31,7 @@ from dvu.carga.excel_comprobantes import exportar_comprobantes
 from dvu.comprobantes import Entrada, marcar_ingresado, registrar
 from dvu.db.models import Comprobante, Usuario
 from dvu.domain.comprobante import ETIQUETAS, EstadoComprobante, parsear_facturas, parsear_monto
+from dvu.domain.roles import ADMIN, VENDEDOR
 
 router = APIRouter(prefix="/comprobantes", tags=["comprobantes"])
 
@@ -88,7 +89,7 @@ class PaginaComprobantes(BaseModel):
 def crear(
     entrada: ComprobanteEntrada,
     session: SessionDep,
-    usuario: Annotated[Usuario, Depends(exige_rol("vendedor"))],
+    usuario: Annotated[Usuario, Depends(exige_rol(VENDEDOR))],
 ) -> ComprobanteOut:
     """Registra el aviso del vendedor. Nunca falla por datos incompletos."""
     comprobante = registrar(session, _a_entrada(entrada, usuario.id))
@@ -109,7 +110,7 @@ def subir_imagen(
     vendedor avisa primero y adjunta cuando le carga la imagen.
     """
     comprobante = _cargar(session, uuid)
-    if usuario.rol != "admin" and comprobante.vendedor_id != usuario.id:
+    if usuario.rol != ADMIN and comprobante.vendedor_id != usuario.id:
         raise HTTPException(status.HTTP_403_FORBIDDEN, detail="No es tu comprobante")
 
     try:
@@ -135,6 +136,11 @@ def ver_imagen(
     devuelve el contenido por esta vía.
     """
     comprobante = _cargar(session, uuid)
+    # La misma regla que para subirla: el vendedor que lo declaró, o la administración.
+    # Sin esto bastaba tener sesión de cualquier rol para pedir la foto de la
+    # transferencia de cualquier cliente, que es justo lo que dice arriba que no pasa.
+    if usuario.rol != ADMIN and comprobante.vendedor_id != usuario.id:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, detail="No es tu comprobante")
     if comprobante.imagen_key is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="El comprobante no tiene imagen")
     return RedirectResponse(almacen.url_firmada(comprobante.imagen_key), status_code=307)
@@ -143,7 +149,11 @@ def ver_imagen(
 @router.get("", response_model=PaginaComprobantes)
 def listar(
     session: SessionDep,
-    usuario: UsuarioDep,
+    # Vendedor —los suyos, ver `_filtrar`— o administración. Antes bastaba con tener
+    # sesión: `_filtrar` sólo acotaba al rol `vendedor`, así que cualquier otro rol veía
+    # los comprobantes de todos, con monto, banco y número de operación. Al agregar
+    # `editor` eso pasó de ser una puerta entornada a una puerta con cartel.
+    usuario: Annotated[Usuario, Depends(exige_rol(VENDEDOR))],
     estado: Annotated[EstadoComprobante | None, Query()] = None,
     pendientes: Annotated[bool, Query(description="Sólo los que cobranza no ingresó")] = False,
     desde: Annotated[date | None, Query()] = None,
@@ -169,7 +179,7 @@ def listar(
 def marcar(
     uuid: uuid_lib.UUID,
     session: SessionDep,
-    usuario: Annotated[Usuario, Depends(exige_rol("admin"))],
+    usuario: Annotated[Usuario, Depends(exige_rol(ADMIN))],
 ) -> ComprobanteOut:
     """Sale de la bandeja porque cobranza ya lo ingresó. La fila no se borra."""
     comprobante = _cargar(session, uuid)
@@ -179,7 +189,7 @@ def marcar(
 @router.get("/reporte.xlsx")
 def reporte_xlsx(
     session: SessionDep,
-    usuario: Annotated[Usuario, Depends(exige_rol("admin"))],
+    usuario: Annotated[Usuario, Depends(exige_rol(ADMIN))],
     desde: Annotated[date | None, Query()] = None,
     hasta: Annotated[date | None, Query()] = None,
     incluir_ingresados: Annotated[bool, Query()] = True,
@@ -231,7 +241,7 @@ def _filtrar(
     desde: date | None,
     hasta: date | None,
 ) -> Select[tuple[Comprobante]]:
-    if usuario.rol == "vendedor":
+    if usuario.rol == VENDEDOR:
         consulta = consulta.where(Comprobante.vendedor_id == usuario.id)
     if estado is not None:
         consulta = consulta.where(Comprobante.estado == estado.value)

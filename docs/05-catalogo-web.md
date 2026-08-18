@@ -352,6 +352,28 @@ Después, en <http://localhost:8000>:
    con el botón «cambiar», y filtra por «— Sin categoría —» para asignar a mano lo que el
    clasificador no reconoció.
 
+## Roles
+
+| Rol | Qué hace |
+|---|---|
+| `admin` | Todo: cobranza, facturación, usuarios y catálogo. |
+| `editor` | Edita el catálogo y lo imprime. **No** ve cobranza ni facturación. |
+| `vendedor` | Arma pedidos en terreno y registra los comprobantes de pago. |
+| `cliente` | La ferretería que compra: arma su propio pedido. |
+| `bodega` | Prepara y despacha los pedidos. |
+
+La lista vive en `dvu.domain.roles` y de ahí sale todo lo demás —el `CheckConstraint`,
+los `exige_rol`, el seed y el desplegable de la pantalla—. Estaba repartida en cuatro
+sitios y el que se olvidaba de uno no fallaba: dejaba a alguien sin poder entrar.
+
+`editor` existe porque el catálogo lo mantiene alguien que no tiene por qué ver la plata,
+y hasta ahora la única forma de dejarlo editar era darle `admin`.
+
+Los usuarios los crea la administración desde `/admin`. Sólo puede dar `vendedor` y
+`editor`: `admin` se queda fuera a propósito —repartir el rol que puede todo no debería
+ser un formulario más— y `cliente` y `bodega` no se pidieron. Un usuario **no se borra**,
+se desactiva: sus pedidos y comprobantes lo apuntan.
+
 ## Qué falta
 
 - Que el árbol de categorías cubra más del 73 %: hoy 527 productos quedan sin categoría y

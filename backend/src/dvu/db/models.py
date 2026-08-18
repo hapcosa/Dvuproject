@@ -31,6 +31,7 @@ from sqlalchemy.dialects.postgresql import UUID as PgUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from dvu.db.base import Base, TimestampMixin, UUIDMixin, pk
+from dvu.domain.roles import ROLES
 
 # =============================================================================
 # Fase 0 — catálogo
@@ -228,8 +229,12 @@ class Usuario(Base, UUIDMixin, TimestampMixin):
     rol: Mapped[str] = mapped_column(String(16), nullable=False)
     activo: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
+    # La lista sale de `dvu.domain.roles`: la base no importa Python, así que se repite
+    # acá, pero el que manda es el dominio y la migración se genera desde ahí.
     __table_args__ = (
-        CheckConstraint("rol IN ('vendedor','cliente','bodega','admin')", name="ck_usuario_rol"),
+        CheckConstraint(
+            "rol IN (" + ",".join(f"'{r}'" for r in ROLES) + ")", name="ck_usuario_rol"
+        ),
     )
 
 

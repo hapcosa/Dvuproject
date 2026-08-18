@@ -20,11 +20,15 @@ from sqlalchemy.orm import Session
 from dvu.api.deps import exige_rol
 from dvu.db.models import Categoria, Producto, Usuario
 from dvu.db.session import get_session
+from dvu.domain.roles import EDITOR
 
 router = APIRouter(prefix="/categorias", tags=["catálogo"])
 
 SessionDep = Annotated[Session, Depends(get_session)]
-AdminDep = Annotated[Usuario, Depends(exige_rol("admin"))]
+#: Quien mantiene el catálogo. `exige_rol` deja pasar a `admin` siempre, así que esto
+#: es «editor o administrador»: el catálogo lo cuida alguien que no tiene por qué ver
+#: cobranza ni facturación, y antes la única forma de dejarlo editar era darle `admin`.
+EditorDep = Annotated[Usuario, Depends(exige_rol(EDITOR))]
 
 
 class CategoriaOut(BaseModel):
@@ -75,7 +79,7 @@ def listar(
 
 
 @router.post("", response_model=CategoriaOut, status_code=status.HTTP_201_CREATED)
-def crear(entrada: CategoriaEntrada, session: SessionDep, admin: AdminDep) -> CategoriaOut:
+def crear(entrada: CategoriaEntrada, session: SessionDep, admin: EditorDep) -> CategoriaOut:
     categoria = Categoria(slug=entrada.slug, nombre=entrada.nombre, orden=entrada.orden)
     session.add(categoria)
     try:
@@ -90,7 +94,7 @@ def crear(entrada: CategoriaEntrada, session: SessionDep, admin: AdminDep) -> Ca
 
 @router.patch("/{slug}", response_model=CategoriaOut)
 def actualizar(
-    slug: str, parche: CategoriaParche, session: SessionDep, admin: AdminDep
+    slug: str, parche: CategoriaParche, session: SessionDep, admin: EditorDep
 ) -> CategoriaOut:
     categoria = session.scalar(select(Categoria).where(Categoria.slug == slug))
     if categoria is None:

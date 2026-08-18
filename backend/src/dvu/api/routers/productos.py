@@ -31,11 +31,15 @@ from dvu.api.deps import exige_rol
 from dvu.api.objetos import responder_objeto
 from dvu.db.models import Categoria, Producto, ProductoAlias, Usuario
 from dvu.db.session import get_session
+from dvu.domain.roles import EDITOR
 
 router = APIRouter(prefix="/productos", tags=["catálogo"])
 
 SessionDep = Annotated[Session, Depends(get_session)]
-AdminDep = Annotated[Usuario, Depends(exige_rol("admin"))]
+#: Quien mantiene el catálogo. `exige_rol` deja pasar a `admin` siempre, así que esto
+#: es «editor o administrador»: el catálogo lo cuida alguien que no tiene por qué ver
+#: cobranza ni facturación, y antes la única forma de dejarlo editar era darle `admin`.
+EditorDep = Annotated[Usuario, Depends(exige_rol(EDITOR))]
 AlmacenDep = Annotated[Almacen, Depends(get_almacen)]
 
 
@@ -187,7 +191,7 @@ def logo_de_marca(sku: str, session: SessionDep, almacen: AlmacenDep) -> Respons
 
 
 @router.post("", response_model=ProductoOut, status_code=status.HTTP_201_CREATED)
-def crear(entrada: ProductoEntrada, session: SessionDep, usuario: AdminDep) -> ProductoOut:
+def crear(entrada: ProductoEntrada, session: SessionDep, usuario: EditorDep) -> ProductoOut:
     """Alta manual de un producto que no viene en el PDF."""
     producto = Producto(
         sku=entrada.sku.strip(),
@@ -219,7 +223,7 @@ def crear(entrada: ProductoEntrada, session: SessionDep, usuario: AdminDep) -> P
 def subir_imagen(
     sku: str,
     session: SessionDep,
-    usuario: AdminDep,
+    usuario: EditorDep,
     almacen: AlmacenDep,
     archivo: Annotated[UploadFile, File(description="Foto del producto")],
 ) -> ProductoOut:
@@ -249,7 +253,7 @@ def subir_imagen(
 
 @router.patch("/{sku}", response_model=ProductoOut)
 def actualizar(
-    sku: str, parche: ProductoParche, session: SessionDep, usuario: AdminDep
+    sku: str, parche: ProductoParche, session: SessionDep, usuario: EditorDep
 ) -> ProductoOut:
     """Corrige la ficha. `activo=false` la saca del catálogo sin borrar la fila: puede
     estar referenciada en pedidos históricos."""
@@ -278,7 +282,7 @@ def _resolver_categoria(session: Session, slug: str | None) -> Categoria | None:
 
 
 @router.post("/{sku}/alias", response_model=ProductoOut, status_code=status.HTTP_201_CREATED)
-def agregar_alias(sku: str, codigo: str, session: SessionDep, usuario: AdminDep) -> ProductoOut:
+def agregar_alias(sku: str, codigo: str, session: SessionDep, usuario: EditorDep) -> ProductoOut:
     """Suma un código de proveedor. El vendedor busca por el que tenga a mano."""
     producto = _buscar(session, sku)
     limpio = codigo.strip()

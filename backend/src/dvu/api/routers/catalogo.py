@@ -32,6 +32,7 @@ from dvu.api.objetos import responder_objeto
 from dvu.db import maqueta
 from dvu.db.models import CatalogoActivo, CatalogoPagina, Usuario
 from dvu.db.session import get_session
+from dvu.domain.roles import EDITOR
 from dvu.extractor.pagina_subida import PaginaIlegible, convertir
 from dvu.extractor.plantilla import logo_a_la_izquierda
 
@@ -39,7 +40,10 @@ router = APIRouter(prefix="/catalogo", tags=["catálogo"])
 
 SessionDep = Annotated[Session, Depends(get_session)]
 AlmacenDep = Annotated[Almacen, Depends(get_almacen)]
-AdminDep = Annotated[Usuario, Depends(exige_rol("admin"))]
+#: Quien mantiene el catálogo. `exige_rol` deja pasar a `admin` siempre, así que esto
+#: es «editor o administrador»: el catálogo lo cuida alguien que no tiene por qué ver
+#: cobranza ni facturación, y antes la única forma de dejarlo editar era darle `admin`.
+EditorDep = Annotated[Usuario, Depends(exige_rol(EDITOR))]
 
 #: La banda se espeja según la página sea par o impar, como en cualquier pliego impreso.
 CLAVES_BANNER = {"par": "banner_par", "impar": "banner_impar"}
@@ -126,7 +130,7 @@ def paginas(session: SessionDep, incluir_inactivas: bool = False) -> list[Catalo
 async def agregar_pagina(
     session: SessionDep,
     almacen: AlmacenDep,
-    usuario: AdminDep,
+    usuario: EditorDep,
     archivo: Annotated[UploadFile, File()],
     tipo: Annotated[str, Form()],
     pagina: Annotated[int | None, Form()] = None,
@@ -158,7 +162,7 @@ async def reemplazar_archivo(
     pagina_id: int,
     session: SessionDep,
     almacen: AlmacenDep,
-    usuario: AdminDep,
+    usuario: EditorDep,
     archivo: Annotated[UploadFile, File()],
 ) -> CatalogoPagina:
     """Cambia el arte de una página que ya está en la maqueta, sin moverla de lugar.
@@ -177,7 +181,7 @@ async def reemplazar_archivo(
 
 @router.put("/paginas/orden", response_model=list[PaginaDisenoOut])
 def reordenar_paginas(
-    orden: OrdenPaginas, session: SessionDep, usuario: AdminDep
+    orden: OrdenPaginas, session: SessionDep, usuario: EditorDep
 ) -> list[CatalogoPagina]:
     """Guarda el orden de una sección después de arrastrar.
 
@@ -193,7 +197,7 @@ def reordenar_paginas(
 
 @router.patch("/paginas/{pagina_id}", response_model=PaginaDisenoOut)
 def actualizar_pagina(
-    pagina_id: int, cambios: PaginaDisenoPatch, session: SessionDep, usuario: AdminDep
+    pagina_id: int, cambios: PaginaDisenoPatch, session: SessionDep, usuario: EditorDep
 ) -> CatalogoPagina:
     """Cambia la sección, la posición o si la página sale en el catálogo."""
     registro = _buscar_pagina(session, pagina_id)
@@ -217,7 +221,7 @@ def actualizar_pagina(
 
 
 @router.delete("/paginas/{pagina_id}", response_model=PaginaDisenoOut)
-def quitar_pagina(pagina_id: int, session: SessionDep, usuario: AdminDep) -> CatalogoPagina:
+def quitar_pagina(pagina_id: int, session: SessionDep, usuario: EditorDep) -> CatalogoPagina:
     """Saca la página del catálogo sin borrarla.
 
     No se borra el registro ni el objeto del bucket: una oferta que se saca en agosto

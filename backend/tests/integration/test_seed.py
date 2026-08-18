@@ -6,7 +6,7 @@ import pytest
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from dvu.carga.seed import PASSWORD_DEV, SeedEnProduccion, sembrar
+from dvu.carga.seed import PASSWORD_DEV, USUARIOS, SeedEnProduccion, sembrar
 from dvu.config import Settings
 from dvu.db.models import Cliente, Usuario
 from dvu.domain.rut import es_valido
@@ -18,7 +18,9 @@ pytestmark = pytest.mark.integration
 def test_sembrar_crea_usuarios_y_clientes(sesion: Session) -> None:
     resumen = sembrar(sesion)
 
-    assert resumen.usuarios_creados == 3
+    # Atado a la lista y no a un número: agregar un rol de ejemplo no debería romper
+    # un test que no habla de roles.
+    assert resumen.usuarios_creados == len(USUARIOS)
     assert resumen.clientes_creados == 3
 
     admin = sesion.scalar(select(Usuario).where(Usuario.email == "admin@dvu.cl"))

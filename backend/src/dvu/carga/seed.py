@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 
 from dvu.config import get_settings
 from dvu.db.models import Cliente, Usuario
+from dvu.domain.roles import ADMIN, BODEGA, EDITOR, VENDEDOR
 from dvu.domain.rut import normalizar
 from dvu.seguridad import hashear
 
@@ -24,9 +25,10 @@ from dvu.seguridad import hashear
 PASSWORD_DEV = "dvu-dev-1234"  # noqa: S105 — pública a propósito, sólo para desarrollo
 
 USUARIOS: list[tuple[str, str, str]] = [
-    ("admin@dvu.cl", "Administración DVU", "admin"),
-    ("vendedor@dvu.cl", "Vendedor de Ejemplo", "vendedor"),
-    ("bodega@dvu.cl", "Bodega DVU", "bodega"),
+    ("admin@dvu.cl", "Administración DVU", ADMIN),
+    ("editor@dvu.cl", "Editor de Catálogo", EDITOR),
+    ("vendedor@dvu.cl", "Vendedor de Ejemplo", VENDEDOR),
+    ("bodega@dvu.cl", "Bodega DVU", BODEGA),
 ]
 
 CLIENTES: list[tuple[str, str, str, str]] = [

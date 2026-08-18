@@ -1029,3 +1029,20 @@ dialog.ingreso .pista.dev {
      igual porque es lo que se viene a hacer. */
   .col-pedir { width: 64px; }
 }
+
+/* --- usuarios ------------------------------------------------------------ */
+
+/* Un usuario desactivado se sigue viendo —sus pedidos lo apuntan— pero apagado, para
+   que no se confunda con quien sí puede entrar. */
+table.datos tr.inactiva td { opacity: 0.55; }
+table.datos tr.inactiva code { text-decoration: line-through; }
+
+.acciones-fila {
+  display: flex;
+  gap: 6px;
+  white-space: nowrap;
+}
+.acciones-fila button { font-size: 12px; padding: 4px 10px; }
+
+#panel-usuarios h3 { margin: 22px 0 8px; font-size: 15px; }
+#panel-usuarios #pista-rol { margin-top: 6px; font-style: italic; }
