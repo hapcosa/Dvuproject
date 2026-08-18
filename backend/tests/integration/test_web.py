@@ -97,6 +97,24 @@ def test_en_produccion_la_pantalla_de_ingreso_no_nombra_ninguna_cuenta(
     assert 'id="form-login"' in html
 
 
+def test_ninguna_plantilla_llama_a_crypto_random_uuid(cliente_api: TestClient) -> None:
+    """`crypto.randomUUID` existe sólo en contexto seguro: HTTPS o localhost.
+
+    La web se sirve por HTTP plano contra la IP del host, así que ahí no existe y armar
+    una lista reventaba con «crypto.randomUUID is not a function» —en localhost, que es
+    donde se programa, funcionaba siempre—. `DVU.uuid()` cae a `getRandomValues`, que
+    está en todo contexto. Este test es la guarda: el próximo `client_uuid` que alguien
+    escriba tiene que pasar por ahí.
+    """
+    for ruta in PAGINAS:
+        assert "crypto.randomUUID" not in cliente_api.get(ruta).text, ruta
+
+    js = cliente_api.get("/estatico/dvu.js").text
+    # En el módulo sí se nombra, pero detrás de la comprobación que lo hace opcional.
+    assert 'typeof crypto.randomUUID === "function"' in js
+    assert "crypto.getRandomValues" in js
+
+
 def test_los_estaticos_se_sirven(cliente_api: TestClient) -> None:
     css = cliente_api.get("/estatico/dvu.css")
     js = cliente_api.get("/estatico/dvu.js")

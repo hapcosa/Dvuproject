@@ -201,6 +201,27 @@ const DVU = (() => {
       ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]
     );
 
+  /** Un UUID v4, haya o no `crypto.randomUUID`.
+   *
+   *  `randomUUID` existe **sólo en contexto seguro**: HTTPS o localhost. La web se sirve
+   *  por HTTP plano contra la IP de la máquina, así que en el computador de la oficina
+   *  —el único lugar donde esto corre de verdad— no existe, y crear una lista reventaba
+   *  con «crypto.randomUUID is not a function». En el navegador del que programa, en
+   *  localhost, funcionaba siempre.
+   *
+   *  `getRandomValues` sí está en todo contexto, y es lo que importa: el `client_uuid` es
+   *  la llave de idempotencia con la que el backend reconoce un reenvío. Sacarlo de
+   *  `Math.random` daría colisiones, y una colisión acá es un pedido que se come a otro. */
+  function uuid() {
+    if (typeof crypto.randomUUID === "function") return crypto.randomUUID();
+    const b = crypto.getRandomValues(new Uint8Array(16));
+    b[6] = (b[6] & 0x0f) | 0x40; // versión 4
+    b[8] = (b[8] & 0x3f) | 0x80; // variante RFC 4122
+    const hex = [...b].map((x) => x.toString(16).padStart(2, "0")).join("");
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-` +
+      `${hex.slice(16, 20)}-${hex.slice(20)}`;
+  }
+
   /** Dato que el catálogo original no trae: se marca, no se inventa. */
   const oVacio = (valor) =>
     valor ? escapar(valor) : '<span class="vacio">—</span>';
@@ -363,7 +384,7 @@ const DVU = (() => {
 
   return {
     pedir, ingresar, yo, salir, descargar, descargarGrande,
-    pesos, escapar, oVacio, avisar, aplazar, porWhatsapp, proteger,
+    pesos, escapar, oVacio, avisar, aplazar, porWhatsapp, proteger, uuid,
     pintarSesion, urlDeIngreso, rutaLocal, alcanza, PAGINAS,
     haySesion: () => Boolean(token()),
   };

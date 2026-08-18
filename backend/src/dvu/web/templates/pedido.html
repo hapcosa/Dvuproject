@@ -203,7 +203,7 @@ const enServidor = {
     DVU.pedir("/pedidos/borradores", {
       method: "POST",
       body: {
-        client_uuid: crypto.randomUUID(),
+        client_uuid: DVU.uuid(),
         cliente_rut: cliente.rut,
         lineas: lineas.map((l) => ({ sku: l.sku, cantidad: l.cantidad })),
       },
@@ -231,7 +231,7 @@ const enNavegador = {
   },
   crear: (cliente, lineas = []) =>
     Promise.resolve({
-      client_uuid: crypto.randomUUID(),
+      client_uuid: DVU.uuid(),
       cliente_rut: cliente.rut,
       cliente_razon_social: cliente.razon_social,
       observaciones: null,

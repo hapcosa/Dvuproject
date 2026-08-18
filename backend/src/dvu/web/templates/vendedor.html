@@ -114,7 +114,7 @@ function cuerpo(formulario) {
     numero_operacion: dato("numero_operacion"),
     fecha_transferencia: dato("fecha_transferencia"),
     // Idempotencia: si el envío se corta y se reintenta, no se duplica la fila.
-    client_uuid: crypto.randomUUID(),
+    client_uuid: DVU.uuid(),
   };
   if (monto) salida.monto_clp = Number(monto.replace(/[.\s$]/g, ""));
   if (facturas) salida.facturas = facturas.split(/[,;\s]+|\sy\s/).filter(Boolean);
