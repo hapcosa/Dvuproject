@@ -5,7 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="dvu-api" content="{{ api }}">
   <title>{{ titulo }} — DVU</title>
-  <link rel="stylesheet" href="/estatico/dvu.css">
+  {# El `?v=` es la huella de los archivos. Sin él, el navegador se queda con la copia
+     vieja —`StaticFiles` no manda `cache-control`— y un arreglo desplegado no se ve. #}
+  <link rel="stylesheet" href="/estatico/dvu.css?v={{ v }}">
 </head>
 <body>
   {# La sesión va primero: quién eres —o el botón para entrar— es lo que decide qué
@@ -30,7 +32,7 @@
     <code>{{ api }}</code>
   </footer>
 
-  <script src="/estatico/dvu.js"></script>
+  <script src="/estatico/dvu.js?v={{ v }}"></script>
   {% block script %}{% endblock %}
 </body>
 </html>

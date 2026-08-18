@@ -33,3 +33,7 @@ build/
 
 # Docker
 .docker-data/
+
+# Tests del navegador: se instalan al vuelo dentro del contenedor.
+backend/tests/navegador/node_modules/
+backend/tests/navegador/package-lock.json

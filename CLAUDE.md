@@ -84,7 +84,7 @@ backend/
     web/             Prototipo web: plantillas Jinja + CSS/JS sin build
     workers/         Jobs arq
   alembic/           Migraciones
-  tests/
+  tests/             pytest; `tests/navegador/` son los del prototipo web sobre jsdom
 infra/               Config de servicios (postgres init, etc.)
 scripts/             Utilidades de operación
 ```
@@ -100,6 +100,7 @@ make logs
 make shell         # shell en el contenedor api
 make test          # pytest rápido (sin integración; no exige cobertura)
 make test-all      # todos los tests
+make test-web      # el prototipo web sobre un DOM real (necesita `make up` y `make seed`)
 make check         # lint + test-all: lo mismo que corre CI
 make lint          # ruff + mypy
 make fmt           # ruff format

@@ -74,9 +74,23 @@ test: ## Tests rápidos, sin los marcados integration (no exige cobertura)
 test-all: ## Todos los tests, incluidos los de integración
 	$(COMPOSE) run --rm api pytest
 
+# Los tests del prototipo web corren el `dvu.js` real sobre un DOM (jsdom) contra la API
+# levantada: es la única forma de pillar los bugs de estado del carrito, que son de las
+# dos vistas desincronizadas y no del objeto. Piden el stack arriba (`make up`) y datos
+# de ejemplo (`make seed`); si no los encuentran se saltan solos en vez de fallar.
+#
+# **Escriben en la base del stack.** Por eso nunca envían un pedido —no se puede borrar—
+# y borran los borradores que crean. Ver `backend/tests/navegador/ayuda.mjs`.
+.PHONY: test-web
+test-web: ## Tests del prototipo web sobre un DOM real (necesita `make up`)
+	$(COMPOSE) --profile test run --rm web-test
+
 # `test-all` y no `test`: CI corre `pytest -m "not pdf"` contra Postgres y Redis, o sea
 # con los de integración. Acá van además los marcados `pdf`, que se saltan solos si el
 # catálogo no está bajado.
+#
+# `test-web` queda fuera: pide la API sirviendo, que CI no levanta. Se corre a mano al
+# tocar el prototipo web.
 .PHONY: check
 check: lint test-all ## Lo mismo que corre CI
 

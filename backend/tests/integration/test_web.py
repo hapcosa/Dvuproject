@@ -7,10 +7,15 @@ API y que no filtren nada por venir del mismo proceso.
 
 from __future__ import annotations
 
+import re
+from pathlib import Path
+from unittest.mock import patch
+
 import pytest
 from fastapi.testclient import TestClient
 
 from dvu.config import Settings
+from dvu.web import router
 
 pytestmark = pytest.mark.integration
 
@@ -191,6 +196,33 @@ def test_el_estado_de_la_lista_vive_en_un_solo_lugar(cliente_api: TestClient) ->
         html = cliente_api.get(ruta).text
         assert "const enServidor = {" not in html, ruta
         assert "const enNavegador = {" not in html, ruta
+
+
+@pytest.mark.parametrize("ruta", PAGINAS)
+def test_los_estaticos_van_con_huella_en_la_url(cliente_api: TestClient, ruta: str) -> None:
+    """`StaticFiles` no manda `cache-control`, así que el navegador cachea por heurística
+    y ni siquiera revalida: se desplegó el panel del carrito y en pantalla seguía el de
+    antes, sin nada que lo dijera. Con la huella en la URL, un archivo distinto es una
+    URL distinta."""
+    html = cliente_api.get(ruta).text
+
+    assert re.search(r'/estatico/dvu\.css\?v=[0-9a-f]{12}"', html), ruta
+    assert re.search(r'/estatico/dvu\.js\?v=[0-9a-f]{12}"', html), ruta
+
+
+def test_la_huella_cambia_cuando_cambia_el_archivo(tmp_path: Path) -> None:
+    """Si no cambiara, la URL sería estable y el navegador seguiría con la copia vieja:
+    justo lo que se venía a arreglar."""
+    archivo = tmp_path / "dvu.css"
+    archivo.write_text("a{}")
+
+    with patch.object(router, "ESTATICOS", (archivo,)):
+        antes = router.version_estaticos()
+        archivo.write_text("a{color:red}")
+        despues = router.version_estaticos()
+
+    assert antes != despues
+    assert len(antes) == 12
 
 
 def test_los_estaticos_se_sirven(cliente_api: TestClient) -> None:

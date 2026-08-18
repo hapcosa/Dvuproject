@@ -11,6 +11,7 @@ Es un prototipo para mostrar: sin framework, sin build, sin dependencias de CDN.
 
 from __future__ import annotations
 
+from hashlib import sha256
 from pathlib import Path
 
 from fastapi import APIRouter, Request
@@ -23,6 +24,32 @@ RAIZ = Path(__file__).parent
 plantillas = Jinja2Templates(directory=str(RAIZ / "templates"))
 
 router = APIRouter(tags=["web"], include_in_schema=False)
+
+#: Los estáticos que las plantillas enlazan con `?v=`.
+ESTATICOS = (RAIZ / "static" / "dvu.css", RAIZ / "static" / "dvu.js")
+
+
+def version_estaticos() -> str:
+    """Huella de la hoja de estilos y del JS, para colgarla de su URL.
+
+    `StaticFiles` manda `etag` y `last-modified` pero **no** `cache-control`. Sin esa
+    cabecera el navegador cachea por heurística: no revalida y sigue mostrando la versión
+    vieja, así que un arreglo desplegado no se ve y no hay nada en pantalla que lo diga.
+    Pasó: se desplegó el panel del carrito y en el navegador seguía el de antes.
+
+    Con la huella en la URL, un archivo distinto es una URL distinta y el navegador la
+    pide sí o sí; y mientras no cambie, la sigue cacheando como corresponde. Se mira el
+    disco en cada página, que son dos `stat`: la alternativa es acordarse de vaciar la
+    caché a mano, y eso ya falló.
+    """
+    marcas = []
+    for archivo in ESTATICOS:
+        try:
+            info = archivo.stat()
+            marcas.append(f"{info.st_mtime_ns}-{info.st_size}")
+        except OSError:  # pragma: no cover - sólo si falta el archivo
+            marcas.append("0")
+    return sha256("|".join(marcas).encode()).hexdigest()[:12]
 
 PAGINAS = {
     "/": ("catalogo.html", "Catálogo"),
@@ -46,6 +73,7 @@ def _render(request: Request, plantilla: str, titulo: str) -> HTMLResponse:
             # `make seed` y con contraseña conocida: escritas en la pantalla de ingreso
             # de producción serían una invitación, aunque ahí no existan.
             "pista_dev": not ajustes.es_produccion,
+            "v": version_estaticos(),
         },
     )
 

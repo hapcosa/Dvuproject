@@ -96,7 +96,35 @@ services:
       "
     restart: "no"
 
+  # Tests del prototipo web sobre un DOM real (jsdom). No es un servicio de larga vida:
+  # corre con `make test-web` y termina. Va en un perfil para que `make up` no lo levante.
+  #
+  # Vive en un contenedor y no en la máquina para no exigir node instalado: el repo se
+  # abre con Docker y nada más. `node_modules` va en un volumen con nombre porque el
+  # código se monta de sólo lectura y porque reinstalar jsdom en cada corrida son diez
+  # segundos regalados.
+  web-test:
+    profiles: ["test"]
+    image: node:22-alpine
+    working_dir: /app/tests/navegador
+    environment:
+      DVU_WEB_URL: http://api:8000
+      npm_config_cache: /tmp/npm
+    volumes:
+      - ./backend:/app:ro
+      # En la raíz y no junto al test: el código va montado de sólo lectura y ahí no se
+      # puede ni crear el punto de montaje. Node busca `node_modules` subiendo por los
+      # directorios, así que en `/` lo encuentra igual.
+      - webtestmodules:/node_modules
+    depends_on:
+      api: {condition: service_healthy}
+    command: >
+      sh -c "cp /app/tests/navegador/package.json / &&
+             npm install --prefix / --no-save --no-package-lock --silent &&
+             cd /app/tests/navegador && node --test"
+
 volumes:
   pgdata:
   redisdata:
   miniodata:
+  webtestmodules:

@@ -1,0 +1,12 @@
+{
+  "name": "dvu-tests-navegador",
+  "private": true,
+  "description": "Tests del prototipo web sobre un DOM real. Ver README.md.",
+  "type": "module",
+  "scripts": {
+    "test": "node --test"
+  },
+  "devDependencies": {
+    "jsdom": "^26.0.0"
+  }
+}
