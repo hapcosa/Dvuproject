@@ -152,6 +152,32 @@ class Categoria(Base, TimestampMixin):
     )
 
 
+class Marca(Base, TimestampMixin):
+    """El proveedor detrás del producto, con su logo.
+
+    Vive aparte de las columnas que llena el extractor a propósito. `make
+    cargar-catalogo` reescribe `producto.marca_impresa` y `producto.marca_logo_key`
+    en cada recarga sin condición (`carga/catalogo.py`), así que nombrar marcas ahí
+    se perdería en la próxima pasada del PDF. Esta tabla y `producto.marca_id` no los
+    toca la carga: son del editor.
+    """
+
+    __tablename__ = "marca"
+
+    id: Mapped[pk]
+    nombre: Mapped[str] = mapped_column(String(128), nullable=False)
+    #: Único: es lo que va en la URL. `slug_de` le saca los diacríticos justamente
+    #: para que «Bío-Bío» y «Bio-Bio» choquen acá en vez de quedar como dos marcas
+    #: distintas para el mismo logo.
+    slug: Mapped[str] = mapped_column(String(160), unique=True, nullable=False)
+    #: Adoptado de un recorte del extractor o subido a mano. Sin logo la marca sirve
+    #: igual: se muestra el nombre escrito.
+    logo_key: Mapped[str | None] = mapped_column(String(255))
+    activo: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+    productos: Mapped[list[Producto]] = relationship(back_populates="marca")
+
+
 class Producto(Base, UUIDMixin, TimestampMixin):
     __tablename__ = "producto"
 
@@ -159,7 +185,12 @@ class Producto(Base, UUIDMixin, TimestampMixin):
     sku: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
     descripcion: Mapped[str] = mapped_column(Text, nullable=False)
     categoria_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("categoria.id"))
-    marca: Mapped[str | None] = mapped_column(String(128))
+    #: Lo que imprimía la columna «Marca» del PDF. Resultó ser casi siempre una medida
+    #: mal clasificada ('1/2"', 'X', '5 6 8 10 12'): 128 de 1979 productos la tienen y
+    #: ninguno con una marca real. Se conserva como salida del extractor, no como dato
+    #: de negocio: la marca de verdad es `marca_id`.
+    marca_impresa: Mapped[str | None] = mapped_column(String(128))
+    marca_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("marca.id"), index=True)
 
     medida: Mapped[str | None] = mapped_column(String(128))
     medida_valor: Mapped[Decimal | None] = mapped_column(Numeric(12, 4))
@@ -172,8 +203,9 @@ class Producto(Base, UUIDMixin, TimestampMixin):
 
     precio_lista_clp: Mapped[Decimal] = mapped_column(Numeric(12, 0), nullable=False)
     imagen_key: Mapped[str | None] = mapped_column(String(255))
-    #: En el catálogo impreso la marca es el logo del proveedor, no su nombre escrito.
-    #: Por eso `marca` está casi siempre vacía: el dato estaba en un PNG.
+    #: El recorte del logo que hizo el extractor, tal cual: la marca en el impreso es
+    #: un PNG del proveedor y no texto. Son 220 imágenes distintas para 1275 productos,
+    #: y `marca_id` es el resultado de que alguien les pusiera nombre.
     marca_logo_key: Mapped[str | None] = mapped_column(String(255))
 
     activo: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
@@ -184,6 +216,19 @@ class Producto(Base, UUIDMixin, TimestampMixin):
     # `selectin` y no `select`: el catálogo se lista de a 50 filas y cada una muestra su
     # categoría. La tabla tiene diez filas, así que es una consulta más, no cincuenta.
     categoria: Mapped[Categoria | None] = relationship(lazy="selectin")
+    # Por lo mismo que la categoría: son 220 marcas como mucho y cada fila del catálogo
+    # muestra la suya.
+    marca: Mapped[Marca | None] = relationship(back_populates="productos", lazy="selectin")
+
+    @property
+    def marca_nombre(self) -> str | None:
+        """El nombre de la marca, o `None` si nadie la nombró todavía.
+
+        Existe para que la ficha de la API pueda leerse sola del modelo: ahí `marca` es
+        el nombre y acá es la relación, y sin este puente habría que armar la salida a
+        mano en cada endpoint que devuelve un producto.
+        """
+        return self.marca.nombre if self.marca is not None else None
 
     __table_args__ = (
         CheckConstraint("multiplo_venta >= 1", name="ck_producto_multiplo_positivo"),

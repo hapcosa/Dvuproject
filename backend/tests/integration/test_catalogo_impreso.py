@@ -22,6 +22,7 @@ from dvu.carga.categorias import clasificar_catalogo
 from dvu.db.models import (
     CatalogoActivo,
     CatalogoPagina,
+    Marca,
     Producto,
     ProductoAlias,
     Usuario,
@@ -80,7 +81,7 @@ def datos(sesion: Session) -> dict[str, Any]:
         unidad_venta="UNID",
         precio_lista_clp=Decimal("1790"),
         imagen_key="catalogo/abc123.png",
-        marca="VINILIT",
+        marca=Marca(nombre="VINILIT", slug="vinilit"),
         medida="110MM",
     )
     codo.alias = [ProductoAlias(codigo="PR/49573", origen="pdf")]
@@ -374,8 +375,23 @@ def test_sin_logo_la_marca_cae_al_nombre_escrito(
     sesion: Session, almacen: AlmacenDeMentira, datos: dict[str, Any]
 ) -> None:
     """Un producto cargado a mano por el administrador no tiene logo del PDF. Antes de
-    dejar la celda vacía se escribe la marca: el dato existe."""
+    dejar la celda vacía se escribe el nombre de la marca: el dato existe."""
     assert "VINILIT" in _texto(exportar_catalogo_pdf(sesion, almacen))
+
+
+def test_sin_marca_nombrada_queda_lo_que_imprimio_el_pdf(
+    sesion: Session, almacen: AlmacenDeMentira, datos: dict[str, Any]
+) -> None:
+    """Último recurso: la columna «Marca» del PDF, que casi siempre trae basura.
+
+    Se muestra igual porque el hueco no ayuda a nadie, pero va después de la marca
+    nombrada: mientras alguien no le ponga nombre al logo, esto es todo lo que hay.
+    """
+    producto = sesion.query(Producto).filter_by(sku="DVU-TEE").one()
+    producto.marca_impresa = "FEDERAL"
+    sesion.flush()
+
+    assert "FEDERAL" in _texto(exportar_catalogo_pdf(sesion, almacen))
 
 
 # --- el orden de la maqueta -------------------------------------------------

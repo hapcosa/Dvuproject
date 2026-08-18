@@ -158,6 +158,16 @@ def key_comprobante(pago_uuid: uuid_lib.UUID, extension: str) -> str:
     return f"comprobantes/{pago_uuid}.{extension}"
 
 
+def key_logo_marca(slug: str, extension: str) -> str:
+    """Logo subido a mano para una marca.
+
+    Prefijo propio y no `catalogo/marcas/`, que es donde el extractor deja sus recortes
+    con nombre de hash: así se ve de un vistazo cuál logo salió del PDF y cuál lo puso
+    una persona, y resubir uno no puede pisar el recorte de otra marca.
+    """
+    return f"marcas/{slug}.{extension}"
+
+
 def key_imagen_producto(sku: str, extension: str) -> str:
     """Foto subida a mano, bajo el mismo prefijo que las que salen del PDF.
 

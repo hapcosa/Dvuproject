@@ -35,8 +35,9 @@ permisos que mantener, todo lo que la web puede hacer está documentado en `/doc
 hay sesión de servidor ni superficie de CSRF.
 
 **Sin framework, sin build, sin CDN.** Es un prototipo que tiene que abrirse en el
-computador de la oficina sin instalar nada. Tres archivos: una hoja de estilos, un
-módulo JS de ~130 líneas y las plantillas.
+computador de la oficina sin instalar nada. Tres piezas: una hoja de estilos, un
+módulo JS compartido (`dvu.js`) y las plantillas. El módulo creció con el carrito y la
+sesión; sigue sin dependencias.
 
 **El token va en `sessionStorage`, no en `localStorage`.** Se borra al cerrar la
 pestaña. En un equipo compartido de bodega esa diferencia importa.
@@ -383,10 +384,72 @@ Los usuarios los crea la administración desde `/admin`. Sólo puede dar `vended
 ser un formulario más— y `bodega` no se pidió. Un usuario **no se borra**,
 se desactiva: sus pedidos y comprobantes lo apuntan.
 
+## Las marcas
+
+En el catálogo impreso **la marca es el logo del proveedor, no su nombre escrito**. Eso
+tiene una consecuencia incómoda: el extractor recorta bien los logos —1275 productos
+tienen uno, en **220 imágenes distintas**— pero no puede leerlos. Llegan como imágenes
+anónimas: no se pueden listar, ni buscar, ni corregir.
+
+La columna `Marca` del PDF tampoco sirve. Trae 33 valores distintos en 1979 productos y
+**ninguno es una marca**: son medidas que cayeron en la columna equivocada.
+
+```
+1/2"  ·  X  ·  5 6 8 10 12  ·  12"  ·  1,5  ·  75 75  ·  110 110
+```
+
+Se conserva igual, como `producto.marca_impresa`, porque es la salida literal del
+extractor y sirve para diagnosticar. Lo que no se hace es mostrarla como si fuera una
+marca.
+
+**La marca vive en su propia tabla, y esa es la decisión que importa.** `_aplicar`
+reescribe `marca_impresa` y `marca_logo_key` en cada `make cargar-catalogo`, sin
+condición. Si el nombre que puso una persona viviera en esas columnas, la próxima
+recarga del PDF lo borraría sin dejar rastro. `marca` y `producto.marca_id` no los toca
+la carga.
+
+### Ponerle nombre a un logo
+
+`/admin` muestra los recortes sin nombre **ordenados por cuántos productos cuelgan de
+cada uno**, porque el reparto es muy desparejo y conviene empezar por donde rinde:
+
+| Recorte | Productos | Marca |
+|---|---:|---|
+| `3d587bc1…` | 133 | Hoffens |
+| `9bb2305c…` | 94 | Vinilit |
+| `86d1710d…` | 71 | Resco |
+| `d9e993d8…` | 49 | Rex |
+| `54e98da6…` | 43 | Vinilit |
+
+Elegir la marca en esa lista se la da a todos sus productos de una (`POST
+/marcas/{slug}/adoptar`). Cinco recortes nombrados cubren 390 productos.
+
+Las dos últimas filas son la misma marca: **Vinilit sale recortada distinto en cada
+página** y cada recorte tiene su propio hash, así que llega como dos logos. Por eso una
+marca puede quedarse con varios recortes — es la forma de juntar los duplicados, y por
+eso adoptar **sólo llena vacíos**: adoptar el segundo recorte no puede deshacer lo que
+alguien ya decidió sobre el primero.
+
+`slug_de` le saca los diacríticos al nombre por la misma razón: «Cementos Bío-Bío» y
+«Cementos Bio-Bio» tienen que chocar, o quedan dos marcas para el mismo proveedor.
+
+### De dónde sale la imagen que se ve
+
+En orden, y se usa la primera que haya:
+
+1. **El logo de la marca** (`/marcas/{slug}/logo`), que es el que alguien subió. Va
+   primero justamente porque se sube cuando el recorte salió cortado.
+2. **El recorte del extractor** (`/productos/{sku}/marca`), que es lo que hay para los
+   1275 productos que vienen del PDF.
+3. **El texto**: el nombre de la marca, o lo que imprimía la columna del PDF.
+4. Si no hay ninguno, se marca el hueco. No se inventa.
+
 ## Qué falta
 
 - Que el árbol de categorías cubra más del 73 %: hoy 527 productos quedan sin categoría y
   sólo se encuentran por búsqueda de texto. Se cierra agregando reglas o asignando a mano
   desde `/admin`; ninguna de las dos cosas requiere código nuevo.
+- Nombrar los 215 recortes de marca que siguen sin nombre (885 productos). Es trabajo
+  humano y no requiere código: se hace desde `/admin`.
 - Pagos en línea y despacho, que este prototipo no cablea a propósito.
 - La app Flutter offline-first, que es el destino final de este flujo.

@@ -98,15 +98,25 @@ function urlImagen(sku) {
   return `${API}/productos/${encodeURIComponent(sku)}/imagen`;
 }
 
-/** La marca del impreso es el logo del proveedor. Si no hay logo se escribe el nombre
- *  —los productos que carga el administrador no vienen del PDF— y si no hay ninguno de
- *  los dos se marca el hueco en vez de inventarlo. */
+/** La marca del impreso es el logo del proveedor, no su nombre escrito.
+ *
+ *  Se prueban tres fuentes en orden. Primero el logo de la marca nombrada: es el que
+ *  alguien subió, y se sube justamente cuando el recorte del extractor salió cortado.
+ *  Después el recorte, que es lo que hay para los 1275 productos que vienen del PDF.
+ *  Al final el texto —el nombre de la marca, o lo que imprimía la columna «Marca»—, y
+ *  si no hay ninguno se marca el hueco en vez de inventarlo. */
 function celdaMarca(p) {
+  const nombre = p.marca || p.marca_impresa || "";
+  const alt = DVU.escapar(nombre);
+  if (p.marca_slug && p.marca_tiene_logo) {
+    return `<img class="logo-marca" loading="lazy" alt="${alt}" title="${alt}"
+                 src="${API}/marcas/${encodeURIComponent(p.marca_slug)}/logo">`;
+  }
   if (p.marca_logo_key) {
-    return `<img class="logo-marca" loading="lazy" alt="${DVU.escapar(p.marca || "")}"
+    return `<img class="logo-marca" loading="lazy" alt="${alt}" title="${alt}"
                  src="${API}/productos/${encodeURIComponent(p.sku)}/marca">`;
   }
-  return DVU.oVacio(p.marca);
+  return DVU.oVacio(nombre);
 }
 
 /** La celda de pedir. Sólo la ven los que pueden pedir: al administrador le sobra, y al

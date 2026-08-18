@@ -145,6 +145,13 @@ make cartola-demo  # cartola de prueba para ensayar la conciliación sin agregad
   dentro del bloque visual.
 - Muchas filas tienen `Marca` vacía y `Venta Min` vacía. Son datos faltantes reales, no
   errores de parseo. No los inventes.
+- **La marca del catálogo es un logo, no un texto.** La columna `Marca` del PDF trae 33
+  valores en 1979 productos y **ninguno es una marca**: son medidas mal clasificadas
+  (`1/2"`, `X`, `5 6 8 10 12`). El dato real son 220 imágenes recortadas que nadie puede
+  leer automáticamente. Por eso existe la tabla `marca`: alguien las nombra desde
+  `/admin` y `producto.marca_id` guarda el resultado. **No pongas la marca curada en
+  `producto.marca_impresa` ni en `marca_logo_key`**: `_aplicar` las reescribe sin
+  condición en cada `make cargar-catalogo` y el trabajo se pierde sin aviso.
 - Chile: RUT con dígito verificador. Validar siempre con módulo 11, guardar normalizado
   sin puntos y con guion (`76123456-7`).
 - **Los tests borran el esquema entero** (`Base.metadata.drop_all`, al empezar y al

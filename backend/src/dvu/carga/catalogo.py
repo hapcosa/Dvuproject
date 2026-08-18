@@ -374,7 +374,10 @@ def _aplicar(producto: Producto, reg: dict[str, Any]) -> None:
     medida = reg["medida"]
 
     producto.descripcion = reg["descripcion"]
-    producto.marca = reg["marca"]
+    # Sólo la salida del extractor. `producto.marca_id` —la marca que alguien nombró—
+    # no se toca acá: si esta función la escribiera, cada recarga del PDF borraría el
+    # trabajo del editor sin dejar rastro.
+    producto.marca_impresa = reg["marca"]
     producto.medida = medida["texto"] or None
     producto.medida_valor = Decimal(medida["valor"]) if medida["valor"] is not None else None
     producto.medida_unidad = medida["unidad"]

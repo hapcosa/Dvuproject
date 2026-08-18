@@ -58,8 +58,10 @@
           <input id="envase" name="envase" placeholder="CAJA, BOLSA, UNID">
         </div>
         <div class="campo">
-          <label for="marca">Marca</label>
-          <input id="marca" name="marca">
+          <label for="marca_slug">Marca</label>
+          <select id="marca_slug" name="marca_slug">
+            <option value="">— sin marca —</option>
+          </select>
         </div>
         <div class="campo">
           <label for="medida">Medida</label>
@@ -119,6 +121,52 @@
     <button class="plano" id="siguiente">Siguiente ›</button>
   </div>
 
+  <section class="tarjeta" id="panel-marcas">
+    <h2>Marcas</h2>
+    <p class="pista">
+      En el catálogo impreso la marca es el <strong>logo del proveedor</strong>, no su
+      nombre escrito. El extractor recorta bien esos logos pero no puede leerlos: llegan
+      como imágenes sin nombre, que no se pueden listar ni buscar. Acá se les pone
+      nombre <strong>una vez</strong> y se llevan todos sus productos de una.
+    </p>
+
+    <div id="aviso-marcas" hidden></div>
+
+    <form class="filtros" id="form-marca">
+      <div class="campo"><label for="m-nombre">Nombre de la marca</label>
+        <input id="m-nombre" required minlength="1" placeholder="Vinilit"></div>
+      <div class="acciones"><button type="submit">Crear marca</button></div>
+    </form>
+
+    <div class="desplazable">
+      <table class="datos">
+        <thead>
+          <tr><th>Logo</th><th>Marca</th><th>Productos</th><th></th></tr>
+        </thead>
+        <tbody id="marcas-filas"><tr><td colspan="4">Cargando…</td></tr></tbody>
+      </table>
+    </div>
+
+    <h3>Logos sin nombre</h3>
+    <p class="pista">
+      La lista de trabajo, del que más rinde al que menos: cada fila es un recorte y
+      cuántos productos cuelgan de él. Elige una marca y se la queda entera. La misma
+      marca puede quedarse con <strong>varios recortes</strong> —sale cortada distinto
+      en cada página del catálogo— y así se juntan los duplicados.
+    </p>
+    <div class="desplazable">
+      <table class="datos">
+        <thead>
+          <tr><th>Logo</th><th>Productos</th><th>Es de la marca…</th></tr>
+        </thead>
+        <tbody id="logos-filas"><tr><td colspan="3">Cargando…</td></tr></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- Uno solo para toda la tabla de marcas, igual que el de las fotos. -->
+  <input type="file" id="archivo-logo" accept="image/jpeg,image/png,image/webp" hidden>
+
   <!-- Usuarios. Sólo la administración: un editor mantiene el catálogo, y repartir
        accesos es otra cosa. El JS la deja oculta para el rol `editor`; el servidor la
        cierra igual, que es donde importa. -->
@@ -171,6 +219,9 @@ let version = 0;
 // El árbol completo, para pintar la lista de cada fila. Incluye las vacías: acá se
 // asigna, y una categoría recién creada empieza sin productos.
 let categorias = [];
+// Las marcas, para pintar la lista de cada fila y la de adoptar. Se recarga entera cada
+// vez que una cambia: son doscientas como mucho, no una tabla de negocio.
+let marcas = [];
 
 /** Mismo atajo que en /pedido: esta página toca muchos ids. */
 const $ = (id) => document.getElementById(id);
@@ -212,7 +263,14 @@ function fila(p) {
       </td>
       ${celda(p, "multiplo_venta", "entero")}
       ${celda(p, "envase")}
-      ${celda(p, "marca")}
+      <td>
+        <select data-marca="${DVU.escapar(p.sku)}">
+          <option value="">— sin marca —</option>
+          ${marcas.map((m) =>
+            `<option value="${DVU.escapar(m.slug)}"${m.slug === p.marca_slug ? " selected" : ""}
+             >${DVU.escapar(m.nombre)}</option>`).join("")}
+        </select>
+      </td>
       ${celda(p, "medida")}
       ${celda(p, "precio_lista_clp", "peso")}
       <td class="codigos">
@@ -311,6 +369,22 @@ filas.addEventListener("change", async (evento) => {
   }
 });
 
+// La marca también se guarda al elegirla, por lo mismo que la categoría.
+filas.addEventListener("change", async (evento) => {
+  const sku = evento.target.dataset?.marca;
+  if (!sku) return;
+  try {
+    await DVU.pedir(`/productos/${encodeURIComponent(sku)}`, {
+      method: "PATCH", body: { marca_slug: evento.target.value || null },
+    });
+    DVU.avisar(mensaje, `Marca de ${sku} guardada.`, "ok");
+    cargarMarcas();
+  } catch (e) {
+    DVU.avisar(mensaje, e.message, "error");
+    cargar();
+  }
+});
+
 // Enter guarda en vez de meter un salto de línea dentro de la celda.
 filas.addEventListener("keydown", (evento) => {
   if (evento.key === "Enter" && evento.target.classList?.contains("edit")) {
@@ -391,7 +465,7 @@ document.getElementById("form-nuevo").onsubmit = async (evento) => {
         precio_lista_clp: soloEnteros(f.precio_lista_clp.value),
         multiplo_venta: Number(f.multiplo_venta.value),
         envase: opcional("envase"),
-        marca: opcional("marca"),
+        marca_slug: opcional("marca_slug"),
         medida: opcional("medida"),
         codigos_proveedor: f.codigos_proveedor.value.split(/[,;]+/)
           .map((c) => c.trim()).filter(Boolean),
@@ -837,6 +911,183 @@ async function cambiar(uuid, cambios, mensajeOk = "") {
   }
 }
 
+
+// --- marcas -----------------------------------------------------------------
+// En el impreso la marca es el logo del proveedor. El extractor lo recorta pero no lo
+// lee: son imágenes anónimas hasta que alguien las nombra acá.
+
+const avisoMarcas = $("aviso-marcas");
+const selectorLogo = $("archivo-logo");
+
+/** Trae las marcas y la lista de recortes sin nombre, y repinta las dos tablas. */
+async function cargarMarcas() {
+  try {
+    [marcas, logosSinNombre] = await Promise.all([
+      DVU.pedir("/marcas"),
+      DVU.pedir("/marcas/logos-sin-marca"),
+    ]);
+  } catch (e) {
+    DVU.avisar(avisoMarcas, e.message, "error");
+    return;
+  }
+  pintarMarcas();
+  pintarLogos();
+  pintarListasDeMarca();
+}
+
+let logosSinNombre = [];
+
+function pintarMarcas() {
+  $("marcas-filas").innerHTML = marcas.length
+    ? marcas.map((m) => `
+        <tr data-marca-slug="${DVU.escapar(m.slug)}" class="${m.activo ? "" : "inactiva"}">
+          <td class="col-imagen">
+            ${m.tiene_logo
+              ? `<img class="logo-marca" loading="lazy" alt="${DVU.escapar(m.nombre)}"
+                      src="${API}/marcas/${encodeURIComponent(m.slug)}/logo?v=${version}">`
+              : '<div class="sin-imagen">sin logo</div>'}
+          </td>
+          <td class="edit" contenteditable="plaintext-only"
+              data-marca-nombre="${DVU.escapar(m.slug)}">${DVU.escapar(m.nombre)}</td>
+          <td class="numero">${m.productos}</td>
+          <td>
+            <button class="plano" data-logo-de="${DVU.escapar(m.slug)}">cambiar logo</button>
+          </td>
+        </tr>`).join("")
+    : '<tr><td colspan="4">Todavía no hay ninguna marca.</td></tr>';
+}
+
+function pintarLogos() {
+  if (!logosSinNombre.length) {
+    $("logos-filas").innerHTML =
+      '<tr><td colspan="3">Ningún recorte quedó sin nombre.</td></tr>';
+    return;
+  }
+  // La lista de marcas se arma una sola vez y se reusa: con 220 recortes en pantalla,
+  // rearmarla por fila es lo que hace que la tabla se sienta pegada.
+  const opciones = marcas.map((m) =>
+    `<option value="${DVU.escapar(m.slug)}">${DVU.escapar(m.nombre)}</option>`).join("");
+  $("logos-filas").innerHTML = logosSinNombre.map((l) => `
+    <tr>
+      <td class="col-imagen">
+        <img class="logo-marca" loading="lazy" alt=""
+             src="${API}/productos/${encodeURIComponent(l.sku_muestra)}/marca">
+      </td>
+      <td class="numero">${l.productos}</td>
+      <td>
+        <select data-adoptar="${DVU.escapar(l.logo_key)}"
+                ${marcas.length ? "" : "disabled"}>
+          <option value="">${marcas.length ? "— elegir —" : "— crea una marca primero —"}</option>
+          ${opciones}
+        </select>
+      </td>
+    </tr>`).join("");
+}
+
+/** Las listas de marca de la tabla de productos y del alta, con lo que haya ahora. */
+function pintarListasDeMarca() {
+  const opciones = marcas.map((m) =>
+    `<option value="${DVU.escapar(m.slug)}">${DVU.escapar(m.nombre)}</option>`).join("");
+  const alta = $("marca_slug");
+  const elegido = alta.value;
+  alta.innerHTML = `<option value="">— sin marca —</option>${opciones}`;
+  alta.value = elegido;
+}
+
+$("form-marca").onsubmit = async (evento) => {
+  evento.preventDefault();
+  const nombre = $("m-nombre").value.trim();
+  try {
+    await DVU.pedir("/marcas", { method: "POST", body: { nombre } });
+    DVU.avisar(avisoMarcas, `Marca «${nombre}» creada.`, "ok");
+    $("m-nombre").value = "";
+    await cargarMarcas();
+  } catch (e) {
+    DVU.avisar(avisoMarcas, e.message, "error");
+  }
+};
+
+// Adoptar: elegir la marca de un recorte se la da a todos sus productos de una.
+$("logos-filas").addEventListener("change", async (evento) => {
+  const logoKey = evento.target.dataset?.adoptar;
+  if (!logoKey || !evento.target.value) return;
+  try {
+    const r = await DVU.pedir(`/marcas/${encodeURIComponent(evento.target.value)}/adoptar`, {
+      method: "POST", body: { logo_key: logoKey },
+    });
+    DVU.avisar(
+      avisoMarcas,
+      `«${r.marca.nombre}» se quedó con ${r.productos_asignados} producto` +
+        `${r.productos_asignados === 1 ? "" : "s"}.`,
+      "ok",
+    );
+    await cargarMarcas();
+    cargar();
+  } catch (e) {
+    DVU.avisar(avisoMarcas, e.message, "error");
+    cargarMarcas();
+  }
+});
+
+// Renombrar en la misma celda, como el resto de la tabla.
+$("marcas-filas").addEventListener("blur", async (evento) => {
+  const slug = evento.target.dataset?.marcaNombre;
+  if (!slug) return;
+  const nombre = evento.target.textContent.trim();
+  const antes = marcas.find((m) => m.slug === slug);
+  if (!antes || nombre === antes.nombre) return;
+  if (!nombre) {
+    evento.target.textContent = antes.nombre;
+    return;
+  }
+  try {
+    await DVU.pedir(`/marcas/${encodeURIComponent(slug)}`, {
+      method: "PATCH", body: { nombre },
+    });
+    DVU.avisar(avisoMarcas, "Marca renombrada.", "ok");
+    await cargarMarcas();
+    cargar();
+  } catch (e) {
+    DVU.avisar(avisoMarcas, e.message, "error");
+    cargarMarcas();
+  }
+}, true);
+
+$("marcas-filas").addEventListener("keydown", (evento) => {
+  if (evento.key === "Enter" && evento.target.dataset?.marcaNombre) {
+    evento.preventDefault();
+    evento.target.blur();
+  }
+});
+
+$("marcas-filas").addEventListener("click", (evento) => {
+  const slug = evento.target.dataset?.logoDe;
+  if (!slug) return;
+  selectorLogo.dataset.slug = slug;
+  selectorLogo.click();
+});
+
+selectorLogo.onchange = async () => {
+  const archivo = selectorLogo.files[0];
+  const slug = selectorLogo.dataset.slug;
+  if (!archivo || !slug) return;
+  const cuerpo = new FormData();
+  cuerpo.append("archivo", archivo);
+  try {
+    await DVU.pedir(`/marcas/${encodeURIComponent(slug)}/logo`, {
+      method: "POST", body: cuerpo,
+    });
+    // La URL del logo no cambia al reemplazarlo: sin esto seguiría el viejo en pantalla.
+    version += 1;
+    DVU.avisar(avisoMarcas, "Logo actualizado.", "ok");
+    await cargarMarcas();
+  } catch (e) {
+    DVU.avisar(avisoMarcas, e.message, "error");
+  } finally {
+    selectorLogo.value = "";
+  }
+};
+
 // El árbol primero: la tabla lo necesita para pintar la lista de cada fila.
 DVU.proteger({
   rol: ["editor"],
@@ -847,7 +1098,11 @@ DVU.proteger({
       $("panel-usuarios").hidden = false;
       cargarRoles().then(cargarUsuarios).catch(() => {});
     }
-    return cargarCategorias().then(cargar).then(cargarPaginas);
+    // Las marcas antes que la tabla, por lo mismo que el árbol: cada fila pinta su
+    // lista de marcas y sin ellas saldría vacía.
+    return Promise.all([cargarCategorias(), cargarMarcas()])
+      .then(cargar)
+      .then(cargarPaginas);
   },
 });
 </script>

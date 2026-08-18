@@ -265,6 +265,9 @@ table.catalogo tbody tr:hover { background: #fff7f8; }
 /* La foto abre la ficha: se marca que es clickeable o nadie la toca. */
 .miniatura, .logo-marca { cursor: zoom-in; }
 
+/* En el panel de marcas el logo no abre nada: es la marca, no un producto. */
+#panel-marcas .logo-marca { cursor: default; }
+
 /* --- páginas de arte del catálogo (portada, ofertas, contraportada) ------ */
 
 .portadas {

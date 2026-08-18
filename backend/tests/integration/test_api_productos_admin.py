@@ -122,15 +122,35 @@ def test_corregir_precio_y_descripcion(
 def test_lo_que_no_viene_en_el_parche_no_se_toca(
     cliente_api: TestClient, datos: dict[str, Any]
 ) -> None:
+    cliente_api.post(f"{PREFIJO}/marcas", json={"nombre": "Federal"}, headers=datos["auth_admin"])
     r = cliente_api.patch(
         f"{PREFIJO}/productos/DVU-PR49573",
-        json={"marca": "FEDERAL"},
+        json={"marca_slug": "federal"},
         headers=datos["auth_admin"],
     )
 
-    assert r.json()["marca"] == "FEDERAL"
+    assert r.json()["marca"] == "Federal"
     assert r.json()["multiplo_venta"] == 12
     assert r.json()["descripcion"] == "LIQUIDO DE FRENO FEDERAL"
+
+
+def test_un_campo_que_no_existe_en_el_parche_es_error_y_no_un_200_mudo(
+    cliente_api: TestClient, datos: dict[str, Any]
+) -> None:
+    """El parche que se ignora en silencio es peor que el que falla.
+
+    `marca` se llamó así hasta que la marca pasó a ser una tabla. Sin esto, quien
+    siguiera mandando el nombre viejo recibía 200, no se guardaba nada y no había
+    forma de notarlo desde el otro lado.
+    """
+    r = cliente_api.patch(
+        f"{PREFIJO}/productos/DVU-PR49573",
+        json={"marca": "Federal"},
+        headers=datos["auth_admin"],
+    )
+
+    assert r.status_code == 422
+    assert "marca" in r.text
 
 
 def test_desactivar_saca_del_catalogo_sin_borrar(
@@ -182,7 +202,7 @@ def test_agregar_el_mismo_alias_dos_veces_es_inocuo(
 
 def test_producto_inexistente_da_404(cliente_api: TestClient, datos: dict[str, Any]) -> None:
     r = cliente_api.patch(
-        f"{PREFIJO}/productos/NO-EXISTE", json={"marca": "X"}, headers=datos["auth_admin"]
+        f"{PREFIJO}/productos/NO-EXISTE", json={"medida": "X"}, headers=datos["auth_admin"]
     )
 
     assert r.status_code == 404
@@ -192,7 +212,7 @@ def test_producto_inexistente_da_404(cliente_api: TestClient, datos: dict[str, A
     ("metodo", "ruta", "cuerpo"),
     [
         ("post", "/productos", {"sku": "X", "descripcion": "X", "precio_lista_clp": 1}),
-        ("patch", "/productos/DVU-PR49573", {"marca": "X"}),
+        ("patch", "/productos/DVU-PR49573", {"medida": "X"}),
     ],
 )
 def test_el_vendedor_no_edita_el_catalogo(

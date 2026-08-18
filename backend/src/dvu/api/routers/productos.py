@@ -29,7 +29,7 @@ from dvu.almacenamiento import (
 )
 from dvu.api.deps import exige_rol
 from dvu.api.objetos import responder_objeto
-from dvu.db.models import Categoria, Producto, ProductoAlias, Usuario
+from dvu.db.models import Categoria, Marca, Producto, ProductoAlias, Usuario
 from dvu.db.session import get_session
 from dvu.domain.roles import EDITOR
 
@@ -44,12 +44,23 @@ AlmacenDep = Annotated[Almacen, Depends(get_almacen)]
 
 
 class ProductoOut(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
+    # `populate_by_name` porque `marca` se lee del modelo por `marca_nombre`: en el
+    # modelo `marca` es la relación, acá es el nombre.
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
     uuid: uuid_lib.UUID
     sku: str
     descripcion: str
-    marca: str | None
+    #: La marca que alguien nombró. `None` mientras su logo siga sin nombre.
+    marca: str | None = Field(default=None, validation_alias="marca_nombre")
+    marca_slug: str | None = None
+    #: Si la marca tiene logo propio, está en `GET /marcas/{marca_slug}/logo`.
+    #: Ese le gana al recorte del extractor: es el que se sube justamente
+    #: cuando el recorte salió cortado.
+    marca_tiene_logo: bool = False
+    #: Lo que imprimía la columna «Marca» del PDF: casi siempre una medida mal
+    #: clasificada. Se devuelve para poder corregirla, no para mostrarla como marca.
+    marca_impresa: str | None = None
     medida: str | None
     unidad_venta: str
     #: Cantidad mínima y escalón de compra. El carrito valida contra este valor.
@@ -57,8 +68,8 @@ class ProductoOut(BaseModel):
     envase: str | None
     precio_lista_clp: int
     imagen_key: str | None
-    #: En el catálogo impreso la marca es el logo del proveedor, no su nombre escrito:
-    #: por eso `marca` viene casi siempre vacía y esto casi siempre lleno.
+    #: El recorte del logo que hizo el extractor. Es el que muestra el catálogo
+    #: mientras la marca no tenga nombre.
     marca_logo_key: str | None = None
     #: `None` es un valor legítimo: hay familias del catálogo sin regla de clasificación
     #: y no se les inventa una. Siguen apareciendo en la búsqueda por texto.
@@ -84,20 +95,32 @@ class ProductoEntrada(BaseModel):
     multiplo_venta: int = Field(default=1, ge=1)
     unidad_venta: str = "UNID"
     envase: str | None = None
-    marca: str | None = None
+    #: Slug de una marca ya creada (`POST /marcas`). No se crea al vuelo: una marca
+    #: nueva por cada tipeo distinto es justamente lo que dejó el catálogo con 220
+    #: logos anónimos.
+    marca_slug: str | None = None
     medida: str | None = None
     codigos_proveedor: list[str] = Field(default_factory=list)
 
 
 class ProductoParche(BaseModel):
-    """Corrección puntual. Lo que no viene no se toca."""
+    """Corrección puntual. Lo que no viene no se toca.
+
+    `extra="forbid"` porque el modo de falla natural de un parche es el peor: un campo
+    con el nombre equivocado se ignora, la API responde 200 y el editor se va creyendo
+    que guardó. Pasó al renombrar `marca`: la página seguía mandando el nombre viejo y
+    la respuesta no decía nada. Mejor un 422 que nombre el campo.
+    """
+
+    model_config = ConfigDict(extra="forbid")
 
     descripcion: str | None = Field(default=None, min_length=1)
     precio_lista_clp: int | None = Field(default=None, ge=0)
     multiplo_venta: int | None = Field(default=None, ge=1)
     unidad_venta: str | None = None
     envase: str | None = None
-    marca: str | None = None
+    #: Slug de la marca, o `null` para sacarla.
+    marca_slug: str | None = None
     medida: str | None = None
     activo: bool | None = None
     #: Slug de la categoría, o `null` para sacarla. La corrección a mano manda: la
@@ -200,7 +223,7 @@ def crear(entrada: ProductoEntrada, session: SessionDep, usuario: EditorDep) -> 
         multiplo_venta=entrada.multiplo_venta,
         unidad_venta=entrada.unidad_venta,
         envase=entrada.envase,
-        marca=entrada.marca,
+        marca=_resolver_marca(session, entrada.marca_slug),
         medida=entrada.medida,
     )
     producto.alias = [
@@ -260,6 +283,9 @@ def actualizar(
     producto = _buscar(session, sku)
     cambios = parche.model_dump(exclude_unset=True)
 
+    if "marca_slug" in cambios:
+        producto.marca = _resolver_marca(session, cambios.pop("marca_slug"))
+
     if "categoria_slug" in cambios:
         # Se asigna la relación y no `categoria_id`: la ficha que se devuelve sale de
         # `producto.categoria`, y tocando sólo el id quedaría mostrando la categoría
@@ -270,6 +296,15 @@ def actualizar(
         setattr(producto, campo, valor)
     session.flush()
     return _a_salida(producto)
+
+
+def _resolver_marca(session: Session, slug: str | None) -> Marca | None:
+    if slug is None:
+        return None
+    marca = session.scalar(select(Marca).where(Marca.slug == slug))
+    if marca is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail=f"No existe la marca {slug}")
+    return marca
 
 
 def _resolver_categoria(session: Session, slug: str | None) -> Categoria | None:
@@ -317,4 +352,7 @@ def _a_salida(producto: Producto) -> ProductoOut:
     if producto.categoria is not None:
         salida.categoria_slug = producto.categoria.slug
         salida.categoria_nombre = producto.categoria.nombre
+    if producto.marca is not None:
+        salida.marca_slug = producto.marca.slug
+        salida.marca_tiene_logo = producto.marca.logo_key is not None
     return salida

@@ -5,7 +5,7 @@ las tres piezas y `cargar-catalogo --con-imagenes` las dejó en el almacén:
 
 - las fotos de producto (`producto.imagen_key`),
 - el logo de la marca (`producto.marca_logo_key`) — en el impreso la marca es un PNG del
-  proveedor, no texto, y por eso `producto.marca` está casi siempre vacío,
+  proveedor, no texto, y por eso `producto.marca_impresa` está casi siempre vacío,
 - la banda roja del encabezado y las páginas de arte (`catalogo_activo`,
   `catalogo_pagina`).
 
@@ -361,8 +361,10 @@ def _celda_marca(producto: Producto, logos: dict[str, Path]) -> Any:
     ruta = logos.get(producto.marca_logo_key or "")
     if ruta is not None:
         return Image(str(ruta), width=LOGO_ANCHO, height=LOGO_ALTO, kind="proportional", lazy=2)
-    if producto.marca:
-        return Parrafo(_escapar(producto.marca), _ESTILO_CELDA)
+    if producto.marca is not None:
+        return Parrafo(_escapar(producto.marca.nombre), _ESTILO_CELDA)
+    if producto.marca_impresa:
+        return Parrafo(_escapar(producto.marca_impresa), _ESTILO_CELDA)
     return _vacio()
 
 
