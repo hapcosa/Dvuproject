@@ -115,6 +115,62 @@ def test_ninguna_plantilla_llama_a_crypto_random_uuid(cliente_api: TestClient) -
     assert "crypto.getRandomValues" in js
 
 
+@pytest.mark.parametrize("ruta", ["/", "/pedido"])
+def test_el_carrito_va_en_el_catalogo_y_en_pedido(cliente_api: TestClient, ruta: str) -> None:
+    """La lista se arma desde donde se está mirando el producto.
+
+    Antes sólo se podía en /pedido: el vendedor que estaba en el catálogo con el
+    ferretero al lado tenía que cambiar de página, perder la búsqueda y encontrar el
+    producto de nuevo.
+    """
+    html = cliente_api.get(ruta).text
+
+    assert 'id="carrito"' in html
+    assert 'id="carrito-boton"' in html
+
+
+def test_el_carrito_no_se_cuela_donde_no_se_pide(cliente_api: TestClient) -> None:
+    """Cobranza y administración no arman pedidos; un carrito ahí es un adorno que tapa."""
+    for ruta in ["/admin", "/cobranza", "/vendedor", "/ingresar"]:
+        assert 'id="carrito"' not in cliente_api.get(ruta).text, ruta
+
+
+def test_pedido_ya_no_trae_la_barra_de_abajo(cliente_api: TestClient) -> None:
+    """El drawer hace ese papel, y ahora en las dos páginas.
+
+    Dejar las dos serían tres vistas de la misma lista —barra, tarjeta y drawer— con tres
+    sitios donde acordarse de repintar.
+    """
+    html = cliente_api.get("/pedido").text
+
+    assert "barra-pedido" not in html
+    assert "barra-pedido" not in cliente_api.get("/estatico/dvu.css").text
+
+
+def test_el_catalogo_trae_la_columna_de_pedir(cliente_api: TestClient) -> None:
+    """Nace oculta: la muestra el JS sólo si el rol de la sesión puede pedir. El HTML se
+    sirve igual para todos porque no hay sesión de servidor."""
+    html = cliente_api.get("/").text
+
+    assert 'id="th-pedir" hidden' in html
+
+
+def test_el_estado_de_la_lista_vive_en_un_solo_lugar(cliente_api: TestClient) -> None:
+    """El carrito lo tiene `dvu.js`, no cada plantilla.
+
+    Cuando /pedido guardaba su propia copia no había con qué compartirla: el catálogo
+    habría necesitado una segunda, y la que se desincroniza es la que se está mirando.
+    """
+    js = cliente_api.get("/estatico/dvu.js").text
+    assert "carrito.montar" in js
+
+    # Las plantillas leen del carrito; no declaran su propio almacén de listas.
+    for ruta in ["/", "/pedido"]:
+        html = cliente_api.get(ruta).text
+        assert "const enServidor = {" not in html, ruta
+        assert "const enNavegador = {" not in html, ruta
+
+
 def test_los_estaticos_se_sirven(cliente_api: TestClient) -> None:
     css = cliente_api.get("/estatico/dvu.css")
     js = cliente_api.get("/estatico/dvu.js")

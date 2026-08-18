@@ -650,7 +650,7 @@ table.editable .edit.guardado { background: #dcfce7; border-left-color: var(--ve
 }
 .cabecera-lista h2 { margin: 0; }
 .cabecera-lista .pista { margin: 2px 0 0; }
-.cabecera-lista .acciones, .barra-pedido .acciones { align-items: center; }
+.cabecera-lista .acciones { align-items: center; }
 
 /* Estado del guardado. Se dice siempre, incluso cuando salió bien: en terreno, no saber
  * si la lista quedó guardada obliga a volver a revisarla. */
@@ -699,27 +699,6 @@ tr.linea-mala .arreglar { margin-top: 4px; }
 
 table.datos tfoot th { background: #f9fafb; }
 table.datos tfoot tr.total th { font-size: 16px; color: var(--rojo); background: #fff7f7; }
-
-/* La barra de abajo: mientras se buscan productos la lista queda fuera de pantalla, y
- * el vendedor tiene que poder responder «cuánto llevamos» sin subir a mirar. */
-.barra-pedido {
-  position: sticky;
-  bottom: 0;
-  z-index: 20;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 12px;
-  padding: 10px 16px;
-  margin: 0 auto;
-  max-width: 1180px;
-  background: var(--papel);
-  border-top: 2px solid var(--rojo);
-  box-shadow: 0 -2px 10px rgb(0 0 0 / 12%);
-}
-.barra-pedido .resumen { display: flex; flex-direction: column; }
-.barra-pedido strong { font-size: 18px; color: var(--rojo); }
-.barra-pedido .pista { margin: 0; }
 
 /* El detalle de un pedido no tiene foto al lado: es una tabla y una bitácora, y las dos
  * quieren el ancho completo. */
@@ -802,7 +781,6 @@ dialog.ingreso .pista.dev {
   .banda .logo { width: 46px; height: 46px; font-size: 28px; }
   table.catalogo { font-size: 11px; }
   .col-marca, .col-medida { display: none; }
-  .barra-pedido { padding: 8px 12px; }
   .cabecera-lista { flex-direction: column; }
 
   /* La barra de arriba en el celular: la sesión ocupa su propia línea y el divisor
@@ -815,4 +793,190 @@ dialog.ingreso .pista.dev {
   dialog.ingreso { padding: 18px; }
   .acciones-ingreso { flex-direction: column-reverse; align-items: stretch; }
   .acciones-ingreso .volver { text-align: center; }
+}
+
+/* --- el carrito ----------------------------------------------------------
+ *
+ * El pedido que se está armando, a mano en el catálogo y en /pedido. Es un panel
+ * lateral y no un modal: en el catálogo se sigue buscando con el drawer abierto.
+ */
+
+.carrito-boton {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 18px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--rojo);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  box-shadow: 0 6px 20px rgb(0 0 0 / 28%);
+  cursor: pointer;
+}
+.carrito-boton:hover { background: var(--rojo-oscuro); }
+.carrito-boton .icono { font-size: 17px; }
+.carrito-boton .cuenta {
+  min-width: 22px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 25%);
+  font-size: 12px;
+}
+
+.carrito-fondo {
+  position: fixed;
+  inset: 0;
+  z-index: 45;
+  background: rgb(15 23 42 / 35%);
+}
+
+.carrito {
+  position: fixed;
+  top: 0;
+  right: 0;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  width: min(400px, 100vw);
+  height: 100dvh;
+  background: var(--papel);
+  box-shadow: -8px 0 32px rgb(0 0 0 / 26%);
+}
+
+.carrito > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  border-bottom: 2px solid var(--rojo);
+}
+.carrito > header h2 { margin: 0; font-size: 17px; }
+.carrito > header .pista { margin: 2px 0 0; font-size: 12px; }
+.carrito .cerrar {
+  border: 0;
+  background: none;
+  font-size: 24px;
+  line-height: 1;
+  color: var(--gris);
+  cursor: pointer;
+}
+/* «cambiar» es un enlace dentro de una frase, no un botón más. */
+.carrito .cambiar {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--azul);
+  font-size: 12px;
+  text-decoration: underline;
+}
+
+.carrito .cuerpo {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 16px;
+}
+.carrito .vacia { padding: 24px 0; text-align: center; }
+
+.carrito .linea {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--gris-borde);
+}
+.carrito .linea:last-child { border-bottom: 0; }
+.carrito .linea .que { min-width: 0; }
+.carrito .linea .desc {
+  display: block;
+  font-weight: 600;
+  /* Dos líneas y corta: la descripción del catálogo llega a ochenta caracteres y
+     empujaría el contador fuera del panel. */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.carrito .linea small { display: block; color: var(--gris); font-size: 12px; }
+.carrito .linea .problema { color: var(--rojo); font-weight: 600; }
+.carrito .linea.linea-mala { background: #fff5f5; }
+.carrito .linea .arreglar {
+  margin-top: 4px;
+  padding: 2px 8px;
+  font-size: 12px;
+}
+.carrito .linea .contador {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+.carrito .linea .contador button {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  font-size: 17px;
+}
+.carrito .linea .plata {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.carrito .linea .quitar {
+  display: block;
+  margin-left: auto;
+  padding: 2px 6px;
+  color: var(--gris);
+}
+
+.carrito > footer {
+  padding: 12px 16px;
+  border-top: 1px solid var(--gris-borde);
+  background: var(--fondo);
+}
+.carrito .totales {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+  font-size: 12px;
+  color: var(--gris);
+}
+.carrito .totales strong { font-size: 19px; color: var(--tinta); }
+.carrito > footer .acciones { display: flex; gap: 8px; }
+.carrito > footer .acciones button { flex: 1; }
+.carrito > footer .guardado { display: block; margin-top: 8px; text-align: right; }
+
+.carrito .elegir-cliente { padding: 12px 0; }
+.carrito .elegir-cliente label {
+  display: block;
+  margin-bottom: 6px;
+  font-weight: 600;
+}
+.carrito .elegir-cliente input { width: 100%; margin-bottom: 10px; }
+.carrito .elegir-cliente > button { width: 100%; }
+.carrito .abiertas { display: flex; flex-direction: column; gap: 6px; }
+.carrito .abiertas .retomar { text-align: left; }
+.carrito .abiertas small { color: var(--gris); }
+
+/* El botón de agregar del catálogo. Va en su propia columna para que la fila siga
+   leyéndose como la del PDF impreso y no como un formulario. */
+.col-pedir { width: 96px; text-align: center; }
+.col-pedir .agregar { padding: 6px 12px; font-size: 13px; }
+.col-pedir .puesta { display: block; margin-top: 4px; font-size: 11px; }
+
+@media (max-width: 720px) {
+  .carrito { width: 100vw; }
+  .carrito-boton { right: 12px; bottom: 12px; }
+  /* En el celular la fila del catálogo ya esconde marca y medida; el botón cabe
+     igual porque es lo que se viene a hacer. */
+  .col-pedir { width: 64px; }
 }

@@ -371,21 +371,583 @@ const DVU = (() => {
    *  un `/auth/yo` por página sin motivo. */
   async function arrancar() {
     if (protegida) return;
-    if (!token()) return pintarSesion(null);
-    try {
-      pintarSesion(await yo());
-    } catch {
-      // Token viejo en una pestaña vieja: no es un error que mostrar, es no haber entrado.
-      cerrarSesion();
-      pintarSesion(null);
-    }
+    const usuario = await quienSoy();
+    if (!usuario) cerrarSesion();
+    pintarSesion(usuario);
   }
   document.addEventListener("DOMContentLoaded", arrancar);
+
+  /** Quién entró, preguntado una sola vez por página.
+   *
+   *  La barra de arriba y el carrito lo necesitan los dos, y los dos corren al cargar:
+   *  sin compartir la respuesta en vuelo, cada página abierta pedía `/auth/yo` dos veces
+   *  para pintar lo mismo. Devuelve `null` en vez de tirar —no haber entrado no es un
+   *  error que mostrar— y por eso el que necesite distinguir un token vencido de un
+   *  servidor caído usa `yo()` directo, como hace `proteger`. */
+  let sesionEnVuelo = null;
+  function quienSoy() {
+    if (quienEntro) return Promise.resolve(quienEntro);
+    if (!token()) return Promise.resolve(null);
+    sesionEnVuelo ||= yo()
+      .catch(() => null)
+      .finally(() => { sesionEnVuelo = null; });
+    return sesionEnVuelo;
+  }
+
+  /* --- el carrito ----------------------------------------------------------
+   *
+   * La lista que se está armando, compartida por el catálogo y por /pedido. Vive acá y no
+   * dentro de cada página porque son dos pantallas que muestran lo mismo: dos copias del
+   * estado se desincronizan, y la que se desincroniza es la que el vendedor está mirando
+   * cuando el ferretero le pregunta cuánto va.
+   *
+   * Lo que el catálogo agrega cae en la **lista activa**, que se recuerda entre páginas.
+   * Sin ese concepto, «Agregar» desde el catálogo no tiene a qué ferretería atribuirse:
+   * un pedido siempre es de alguien.
+   */
+
+  const CLAVE_ACTIVA = "dvu_lista_activa";
+  const CLAVE_LOCAL = "dvu_lista";
+
+  /** El vendedor guarda sus listas en el servidor: la mañana son cinco ferreterías y una
+   *  lista a medias que se pierde por cerrar la pestaña es trabajo que hay que rehacer
+   *  con el cliente al lado. */
+  const enServidor = {
+    guardaVarias: true,
+    listar: () => pedir("/pedidos/borradores"),
+    crear: (cliente, lineas = []) =>
+      pedir("/pedidos/borradores", {
+        method: "POST",
+        body: {
+          client_uuid: uuid(),
+          cliente_rut: cliente.rut,
+          lineas: lineas.map((l) => ({ sku: l.sku, cantidad: l.cantidad })),
+        },
+      }),
+    guardar: (l) =>
+      pedir(`/pedidos/borradores/${l.client_uuid}`, {
+        method: "PUT",
+        body: {
+          cliente_rut: l.cliente_rut,
+          observaciones: l.observaciones || null,
+          lineas: l.lineas.map((x) => ({ sku: x.sku, cantidad: x.cantidad })),
+        },
+      }),
+    descartar: (l) => pedir(`/pedidos/borradores/${l.client_uuid}`, { method: "DELETE" }),
+    enviar: (l) => pedir(`/pedidos/borradores/${l.client_uuid}/enviar`, { method: "POST" }),
+  };
+
+  /** Un usuario con rol `cliente` no tiene a quién atribuirle varias listas —no hay
+   *  vínculo usuario↔cliente— así que arma una sola en el navegador. */
+  const enNavegador = {
+    guardaVarias: false,
+    listar: () => {
+      const guardada = JSON.parse(sessionStorage.getItem(CLAVE_LOCAL) || "null");
+      return Promise.resolve(guardada ? [guardada] : []);
+    },
+    crear: (cliente, lineas = []) =>
+      Promise.resolve({
+        client_uuid: uuid(),
+        cliente_rut: cliente.rut,
+        cliente_razon_social: cliente.razon_social,
+        observaciones: null,
+        lineas,
+      }),
+    guardar: (l) => {
+      sessionStorage.setItem(CLAVE_LOCAL, JSON.stringify(l));
+      return Promise.resolve(l);
+    },
+    descartar: () => {
+      sessionStorage.removeItem(CLAVE_LOCAL);
+      return Promise.resolve();
+    },
+    enviar: (l) =>
+      pedir("/pedidos", {
+        method: "POST",
+        body: {
+          client_uuid: l.client_uuid,
+          cliente_rut: l.cliente_rut,
+          observaciones: l.observaciones || null,
+          creado_en_dispositivo: new Date().toISOString(),
+          lineas: l.lineas.map((x) => ({ sku: x.sku, cantidad: x.cantidad })),
+        },
+      }),
+  };
+
+  /** Cuántos envases son esas unidades. La página habla de envases; el backend, de
+   *  unidades. Traducir en un solo lugar evita el `/multiplo` regado por todos lados. */
+  const envasesDe = (linea) => Math.floor(linea.cantidad / (linea.multiplo_venta || 1));
+
+  /** Normaliza lo que devuelve la API al mínimo que las páginas necesitan. */
+  function aLista(borrador) {
+    return {
+      client_uuid: borrador.client_uuid,
+      cliente_rut: borrador.cliente_rut,
+      cliente_razon_social: borrador.cliente_razon_social || borrador.cliente_rut,
+      observaciones: borrador.observaciones || "",
+      lineas: (borrador.lineas || []).map((l) => ({
+        sku: l.sku,
+        descripcion: l.descripcion,
+        cantidad: l.cantidad,
+        multiplo_venta: l.multiplo_venta,
+      })),
+    };
+  }
+
+  const SIN_TOTALES = { neto_clp: 0, iva_clp: 0, total_clp: 0, con_problema: 0 };
+
+  const carrito = {
+    lista: null,
+    almacen: enNavegador,
+    /** Lo último que respondió `/pedidos/cotizar`, por SKU. */
+    cotizado: new Map(),
+    totales: { ...SIN_TOTALES },
+    /** Los clientes de la cartera, por RUT. */
+    cartera: new Map(),
+    /** Las listas abiertas, para el selector del drawer. */
+    borradores: [],
+    estadoGuardado: "",
+    montado: false,
+  };
+
+  const oyentes = new Set();
+  /** Se suscriben el drawer y la tarjeta grande de /pedido. Una sola fuente, dos vistas. */
+  carrito.alCambiar = (fn) => { oyentes.add(fn); return () => oyentes.delete(fn); };
+  const avisarCambio = () => oyentes.forEach((fn) => fn(carrito));
+
+  carrito.envases = envasesDe;
+  carrito.hayLineas = () => Boolean(carrito.lista?.lineas.length);
+
+  function marcarGuardado(texto, clase = "") {
+    carrito.estadoGuardado = texto;
+    carrito.claseGuardado = clase;
+    avisarCambio();
+  }
+
+  const guardarPronto = aplazar(async () => {
+    if (!carrito.lista) return;
+    marcarGuardado("Guardando…");
+    try {
+      await carrito.almacen.guardar(carrito.lista);
+      marcarGuardado("Guardado", "ok");
+      if (carrito.almacen.guardaVarias) carrito.refrescarBorradores();
+    } catch (e) {
+      // La lista completa viaja en cada guardado, así que el próximo cambio reintenta
+      // solo y sin arrastrar lo que se perdió. Mientras tanto se dice, no se oculta.
+      marcarGuardado("Sin guardar", "error");
+      carrito.error = `No se pudo guardar la lista: ${e.message}`;
+      avisarCambio();
+    }
+  }, 700);
+
+  const cotizarPronto = aplazar(async () => {
+    if (!carrito.lista) return;
+    if (!carrito.lista.lineas.length) {
+      carrito.cotizado = new Map();
+      carrito.totales = { ...SIN_TOTALES };
+      return avisarCambio();
+    }
+    try {
+      const r = await pedir("/pedidos/cotizar", {
+        method: "POST",
+        body: { lineas: carrito.lista.lineas.map((l) => ({ sku: l.sku, cantidad: l.cantidad })) },
+      });
+      carrito.cotizado = new Map(r.lineas.map((l) => [l.sku, l]));
+      carrito.totales = r;
+      avisarCambio();
+    } catch (e) {
+      carrito.error = e.message;
+      avisarCambio();
+    }
+  }, 300);
+
+  carrito.guardarPronto = guardarPronto;
+
+  /** Un cambio: se pinta al tiro y se guarda y cotiza cuando pare la mano. */
+  function cambio() {
+    avisarCambio();
+    guardarPronto();
+    cotizarPronto();
+  }
+  carrito.cambio = cambio;
+
+  carrito.abrir = function (borrador) {
+    carrito.lista = aLista(borrador);
+    carrito.cotizado = new Map();
+    carrito.totales = { ...SIN_TOTALES };
+    if (carrito.almacen.guardaVarias) sessionStorage.setItem(CLAVE_ACTIVA, carrito.lista.client_uuid);
+    marcarGuardado("Guardado", "ok");
+    cotizarPronto();
+    avisarCambio();
+    return carrito.lista;
+  };
+
+  carrito.cerrar = function () {
+    carrito.lista = null;
+    carrito.cotizado = new Map();
+    carrito.totales = { ...SIN_TOTALES };
+    sessionStorage.removeItem(CLAVE_ACTIVA);
+    avisarCambio();
+  };
+
+  /** Agrega envases, no unidades: el catálogo y el vendedor hablan de cajas.
+   *
+   *  La cantidad que viaja al backend son unidades y siempre múltiplo del envase, que es
+   *  la regla que no se puede romper: un pedido de 5 de algo que va de a 12 no se
+   *  despacha. */
+  carrito.agregar = function (producto, cuantos = 1) {
+    if (!carrito.lista) return null;
+    const multiplo = producto.multiplo_venta || 1;
+    const existente = carrito.lista.lineas.find((l) => l.sku === producto.sku);
+    if (existente) existente.cantidad += cuantos * multiplo;
+    else
+      carrito.lista.lineas.push({
+        sku: producto.sku,
+        descripcion: producto.descripcion,
+        cantidad: cuantos * multiplo,
+        multiplo_venta: multiplo,
+      });
+    cambio();
+    return existente || carrito.lista.lineas.at(-1);
+  };
+
+  carrito.mover = function (sku, paso) {
+    const linea = carrito.lista?.lineas.find((l) => l.sku === sku);
+    if (!linea) return;
+    const cuantos = envasesDe(linea) + paso;
+    if (cuantos <= 0) return carrito.quitar(sku);
+    linea.cantidad = cuantos * (linea.multiplo_venta || 1);
+    cambio();
+  };
+
+  carrito.fijar = function (sku, cantidad) {
+    const linea = carrito.lista?.lineas.find((l) => l.sku === sku);
+    if (!linea) return;
+    linea.cantidad = Number(cantidad);
+    cambio();
+  };
+
+  carrito.quitar = function (sku) {
+    if (!carrito.lista) return;
+    carrito.lista.lineas = carrito.lista.lineas.filter((l) => l.sku !== sku);
+    cambio();
+  };
+
+  carrito.enLista = (sku) => carrito.lista?.lineas.find((l) => l.sku === sku);
+
+  carrito.crear = async function (cliente, lineas = []) {
+    const borrador = await carrito.almacen.crear(cliente, lineas);
+    if (!carrito.almacen.guardaVarias) await carrito.almacen.guardar(aLista(borrador));
+    await carrito.refrescarBorradores();
+    return carrito.abrir(borrador);
+  };
+
+  carrito.refrescarBorradores = async function () {
+    try {
+      carrito.borradores = await carrito.almacen.listar();
+    } catch { carrito.borradores = []; }
+    avisarCambio();
+    return carrito.borradores;
+  };
+
+  /** Pinta en la lista lo que el backend rechazó, línea por línea. */
+  carrito.marcarProblemas = function (detalle) {
+    let cuantas = 0;
+    for (const problema of detalle) {
+      const linea = carrito.cotizado.get(problema.sku);
+      if (!linea) continue;
+      linea.problema = problema.error;
+      linea.cantidad_sugerida = problema.cantidad_sugerida ?? null;
+      cuantas += 1;
+    }
+    carrito.totales = { ...carrito.totales, con_problema: cuantas };
+    avisarCambio();
+  };
+
+  /** Manda la lista y devuelve el pedido. Lo pendiente se guarda antes: el borrador del
+   *  servidor es lo que se convierte en pedido, no lo que hay en pantalla. */
+  carrito.enviar = async function () {
+    guardarPronto.cancelar();
+    await carrito.almacen.guardar(carrito.lista);
+    const pedido = await carrito.almacen.enviar(carrito.lista);
+    if (!carrito.almacen.guardaVarias) sessionStorage.removeItem(CLAVE_LOCAL);
+    carrito.cerrar();
+    carrito.refrescarBorradores();
+    return pedido;
+  };
+
+  carrito.descartar = async function () {
+    await carrito.almacen.descartar(carrito.lista);
+    carrito.cerrar();
+    carrito.refrescarBorradores();
+  };
+
+  /** El resumen que el vendedor le manda al ferretero para que confirme. */
+  carrito.resumenWhatsapp = (pedido) => {
+    const lineas = pedido.lineas
+      .map((l) =>
+        `• ${l.cantidad / l.multiplo_venta} × ${l.descripcion} ` +
+        `(${l.cantidad} un.) ${pesos(l.total_linea_clp)}`)
+      .join("\n");
+    return `Pedido ${pedido.numero}\n${pedido.cliente_razon_social}\n\n${lineas}\n\n` +
+      `Neto ${pesos(pedido.neto_clp)}\nIVA ${pesos(pedido.iva_clp)}\nTotal ${pesos(pedido.total_clp)}`;
+  };
+
+  carrito.cargarCartera = async function () {
+    try {
+      const r = await pedir("/clientes?limite=200");
+      r.items.forEach((c) => carrito.cartera.set(c.rut, c));
+    } catch { /* sin cartera el selector lo dice; no es motivo para tumbar la página */ }
+    return carrito.cartera;
+  };
+
+  /** Resuelve lo escrito contra la cartera: el desplegable de doscientas ferreterías no
+   *  se puede usar en un celular, así que se escribe y se filtra. */
+  carrito.resolverCliente = function (texto) {
+    const escrito = String(texto || "").trim().toLowerCase();
+    if (!escrito) return null;
+    for (const cliente of carrito.cartera.values()) {
+      if (`${cliente.razon_social} — ${cliente.rut}`.toLowerCase() === escrito) return cliente;
+      if (cliente.rut.toLowerCase() === escrito) return cliente;
+    }
+    const parciales = [...carrito.cartera.values()].filter((c) =>
+      `${c.razon_social} ${c.rut}`.toLowerCase().includes(escrito));
+    return parciales.length === 1 ? parciales[0] : null;
+  };
+
+  /* --- el drawer -----------------------------------------------------------
+   *
+   * No es un `<dialog>`: en el catálogo se sigue buscando con el drawer abierto, así que
+   * no puede ser modal ni robar el foco. En el celular tapa la pantalla, que es lo que
+   * corresponde ahí, pero eso lo decide el CSS y no un cambio de comportamiento. */
+
+  let eligiendoCliente = false;
+  /** Si el drawer es quien dice los errores del carrito. Lo fija `montarDrawer`. */
+  let muestraErrores = false;
+
+  function lineaHtml(l) {
+    const c = carrito.cotizado.get(l.sku);
+    const problema = c?.problema;
+    return `
+      <div class="linea ${problema ? "linea-mala" : ""}">
+        <div class="que">
+          <span class="desc">${escapar(l.descripcion)}</span>
+          <small>de a ${l.multiplo_venta} · ${l.cantidad.toLocaleString("es-CL")} un.</small>
+          ${problema ? `<small class="problema">${escapar(problema)}</small>` : ""}
+          ${c?.cantidad_sugerida
+            ? `<button type="button" class="plano arreglar" data-sku="${escapar(l.sku)}"
+                 data-cantidad="${c.cantidad_sugerida}">Dejar ${c.cantidad_sugerida}</button>`
+            : ""}
+        </div>
+        <div class="contador">
+          <button type="button" class="plano menos" data-sku="${escapar(l.sku)}"
+                  aria-label="Un envase menos">−</button>
+          <b>${envasesDe(l)}</b>
+          <button type="button" class="plano mas" data-sku="${escapar(l.sku)}"
+                  aria-label="Un envase más">+</button>
+        </div>
+        <div class="plata">
+          ${c && !problema ? pesos(c.total_linea_clp) : "—"}
+          <button type="button" class="plano quitar" data-sku="${escapar(l.sku)}"
+                  aria-label="Quitar">✕</button>
+        </div>
+      </div>`;
+  }
+
+  /** El selector de ferretería: sin esto «Agregar» no tiene a quién atribuirse. */
+  function selectorHtml() {
+    const abiertas = carrito.almacen.guardaVarias
+      ? carrito.borradores.filter((b) => b.client_uuid !== carrito.lista?.client_uuid)
+      : [];
+    return `
+      <div class="elegir-cliente">
+        <label for="carrito-cliente">¿Para qué ferretería?</label>
+        <input id="carrito-cliente" list="carrito-clientes" autocomplete="off"
+               placeholder="Escribe la ferretería o el RUT">
+        <datalist id="carrito-clientes">${[...carrito.cartera.values()]
+          .map((c) => `<option value="${escapar(c.razon_social)} — ${escapar(c.rut)}"></option>`)
+          .join("")}</datalist>
+        <button type="button" id="carrito-empezar">Empezar la lista</button>
+        ${abiertas.length
+          ? `<p class="pista">O sigue una que ya tienes abierta:</p>
+             <div class="abiertas">${abiertas.map((b) => `
+               <button type="button" class="plano retomar" data-uuid="${escapar(b.client_uuid)}">
+                 ${escapar(b.cliente_razon_social || b.cliente_rut)}
+                 <small>${b.lineas.length} línea${b.lineas.length === 1 ? "" : "s"}</small>
+               </button>`).join("")}</div>`
+          : ""}
+      </div>`;
+  }
+
+  function pintarDrawer() {
+    const caja = document.getElementById("carrito");
+    if (!caja) return;
+    const cuerpo = document.getElementById("carrito-cuerpo");
+    const pie = document.getElementById("carrito-pie");
+    const boton = document.getElementById("carrito-boton");
+    const lista = carrito.lista;
+    const lineas = lista?.lineas || [];
+
+    document.getElementById("carrito-para").innerHTML = lista
+      ? `${escapar(lista.cliente_razon_social)} · ` +
+        '<button type="button" class="plano cambiar" id="carrito-cambiar">cambiar</button>'
+      : "Todavía no elegiste ferretería";
+
+    // Quién muestra los errores se decide al montar, no por el orden en que se
+    // suscribieron los oyentes: en el catálogo el drawer es la única superficie que
+    // tiene el carrito, y en /pedido ya existe `#mensaje`, que es donde se miran.
+    const aviso = document.getElementById("carrito-error");
+    if (muestraErrores && carrito.error) {
+      aviso.textContent = carrito.error;
+      aviso.hidden = false;
+      carrito.error = null;
+    } else if (!eligiendoCliente) {
+      aviso.hidden = true;
+    }
+
+    if (!lista || eligiendoCliente) cuerpo.innerHTML = selectorHtml();
+    else if (!lineas.length)
+      cuerpo.innerHTML =
+        '<p class="pista vacia">Todavía no agregaste nada. Busca en el catálogo y aprieta ' +
+        "«Agregar».</p>";
+    else cuerpo.innerHTML = lineas.map(lineaHtml).join("");
+
+    const hay = Boolean(lineas.length) && !eligiendoCliente;
+    pie.hidden = !hay;
+    if (hay) {
+      document.getElementById("carrito-totales").innerHTML =
+        `<span>Neto ${pesos(carrito.totales.neto_clp)} · IVA ${pesos(carrito.totales.iva_clp)}</span>
+         <strong>${pesos(carrito.totales.total_clp)}</strong>`;
+      const g = document.getElementById("carrito-guardado");
+      g.textContent = carrito.estadoGuardado;
+      g.className = `guardado ${carrito.claseGuardado || ""}`;
+      document.getElementById("carrito-enviar").disabled = Boolean(carrito.totales.con_problema);
+    }
+
+    // El botón flotante sólo aparece con algo adentro: vacío sería un adorno que tapa.
+    boton.hidden = !lineas.length;
+    document.getElementById("carrito-cuenta").textContent = lineas.length;
+    document.getElementById("carrito-monto").textContent = lineas.length
+      ? pesos(carrito.totales.total_clp)
+      : "";
+  }
+
+  const abrirDrawer = (abierto) => {
+    const caja = document.getElementById("carrito");
+    if (!caja) return;
+    caja.hidden = !abierto;
+    document.getElementById("carrito-fondo").hidden = !abierto;
+    document.getElementById("carrito-boton").setAttribute("aria-expanded", String(abierto));
+    if (abierto) pintarDrawer();
+  };
+  carrito.abrirDrawer = abrirDrawer;
+
+  /** Engancha el drawer al DOM de la página. `alVerCompleta` es lo que hace «Ver
+   *  completa»: en /pedido baja a la tarjeta grande, en el catálogo navega a /pedido. */
+  carrito.montarDrawer = function ({ alVerCompleta, alEnviar, errores = false } = {}) {
+    const caja = document.getElementById("carrito");
+    if (!caja) return;
+    muestraErrores = errores;
+
+    document.getElementById("carrito-boton").onclick = () => abrirDrawer(caja.hidden);
+    document.getElementById("carrito-cerrar").onclick = () => abrirDrawer(false);
+    document.getElementById("carrito-fondo").onclick = () => abrirDrawer(false);
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && !caja.hidden) abrirDrawer(false);
+    });
+
+    document.getElementById("carrito-ver").onclick = () =>
+      alVerCompleta ? alVerCompleta() : (location.href = "/pedido");
+    document.getElementById("carrito-enviar").onclick = () => alEnviar?.();
+
+    caja.addEventListener("click", async (e) => {
+      const boton = e.target.closest("button");
+      if (!boton) return;
+      const { sku, cantidad, uuid: cual } = boton.dataset;
+      if (boton.classList.contains("menos")) return carrito.mover(sku, -1);
+      if (boton.classList.contains("mas")) return carrito.mover(sku, 1);
+      if (boton.classList.contains("quitar")) return carrito.quitar(sku);
+      if (boton.classList.contains("arreglar")) return carrito.fijar(sku, cantidad);
+      if (boton.id === "carrito-cambiar") {
+        eligiendoCliente = true;
+        return pintarDrawer();
+      }
+      if (boton.classList.contains("retomar")) {
+        eligiendoCliente = false;
+        return carrito.abrir(carrito.borradores.find((b) => b.client_uuid === cual));
+      }
+      if (boton.id === "carrito-empezar") {
+        const cliente = carrito.resolverCliente(document.getElementById("carrito-cliente").value);
+        if (!cliente) {
+          carrito.error = "Elige una ferretería de la lista para empezar.";
+          return avisarCambio();
+        }
+        boton.disabled = true;
+        try {
+          eligiendoCliente = false;
+          await carrito.crear(cliente);
+        } catch (err) {
+          carrito.error = err.message;
+          eligiendoCliente = true;
+          avisarCambio();
+        } finally {
+          boton.disabled = false;
+        }
+      }
+    });
+
+    carrito.alCambiar(pintarDrawer);
+    pintarDrawer();
+  };
+
+  /** Agrega desde el catálogo, donde puede no haber lista todavía.
+   *
+   *  Sin lista abierta no se pierde el producto ni se inventa un cliente: se abre el
+   *  drawer en el selector y, apenas se elige la ferretería, entra lo que se quería
+   *  agregar. Perder el clic obligaría a buscar el producto de nuevo. */
+  let pendiente = null;
+  carrito.agregarDesdeCatalogo = async function (producto, cuantos = 1) {
+    if (!carrito.lista) {
+      pendiente = { producto, cuantos };
+      eligiendoCliente = true;
+      abrirDrawer(true);
+      return null;
+    }
+    const linea = carrito.agregar(producto, cuantos);
+    abrirDrawer(true);
+    return linea;
+  };
+
+  carrito.alCambiar(() => {
+    if (pendiente && carrito.lista && !eligiendoCliente) {
+      const { producto, cuantos } = pendiente;
+      pendiente = null;
+      carrito.agregar(producto, cuantos);
+    }
+  });
+
+  /** Deja el carrito listo en cualquier página: elige dónde se guarda según el rol,
+   *  carga la cartera y retoma la lista activa —la que quedó abierta en la otra página—. */
+  carrito.montar = async function (usuario) {
+    carrito.almacen = usuario.rol === "vendedor" ? enServidor : enNavegador;
+    carrito.montado = true;
+    await carrito.cargarCartera();
+    await carrito.refrescarBorradores();
+
+    const activa = sessionStorage.getItem(CLAVE_ACTIVA);
+    const retomar = carrito.almacen.guardaVarias
+      ? carrito.borradores.find((b) => b.client_uuid === activa)
+      : carrito.borradores[0];
+    if (retomar) carrito.abrir(retomar);
+    else avisarCambio();
+    return carrito;
+  };
 
   return {
     pedir, ingresar, yo, salir, descargar, descargarGrande,
     pesos, escapar, oVacio, avisar, aplazar, porWhatsapp, proteger, uuid,
-    pintarSesion, urlDeIngreso, rutaLocal, alcanza, PAGINAS,
+    pintarSesion, urlDeIngreso, rutaLocal, alcanza, PAGINAS, quienSoy,
     haySesion: () => Boolean(token()),
+    carrito,
   };
 })();

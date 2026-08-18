@@ -1,0 +1,42 @@
+{# El pedido que se está armando, siempre a mano.
+
+   Va en el catálogo y en /pedido. Antes sólo se podía armar en /pedido: el vendedor que
+   estaba mirando el catálogo con el ferretero al lado tenía que cambiar de página,
+   perder la búsqueda y volver a encontrar el producto. Ahora agrega desde donde está.
+
+   La cáscara se sirve con la página y el contenido lo pinta `DVU.carrito`, que es el
+   único dueño del estado: el drawer y la tarjeta grande de /pedido son dos vistas de la
+   misma lista, no dos listas. #}
+
+<button type="button" class="carrito-boton" id="carrito-boton" hidden
+        aria-controls="carrito" aria-expanded="false">
+  <span class="icono" aria-hidden="true">🛒</span>
+  <span class="cuenta" id="carrito-cuenta">0</span>
+  <span class="monto" id="carrito-monto"></span>
+</button>
+
+<aside class="carrito" id="carrito" hidden aria-label="El pedido que estás armando">
+  <header>
+    <div>
+      <h2>La lista</h2>
+      <p class="pista" id="carrito-para"></p>
+    </div>
+    <button type="button" class="cerrar" id="carrito-cerrar" aria-label="Cerrar">×</button>
+  </header>
+
+  <div class="aviso error" id="carrito-error" hidden></div>
+  <div class="cuerpo" id="carrito-cuerpo"></div>
+
+  <footer id="carrito-pie" hidden>
+    <div class="totales" id="carrito-totales"></div>
+    <div class="acciones">
+      <button type="button" class="plano" id="carrito-ver">Ver completa</button>
+      <button type="button" id="carrito-enviar">Enviar</button>
+    </div>
+    <span class="guardado" id="carrito-guardado"></span>
+  </footer>
+</aside>
+
+{# El fondo oscuro del drawer abierto. No es un `<dialog>`: en el catálogo se sigue
+   buscando con el drawer abierto, así que no puede volverse modal ni robar el foco. #}
+<div class="carrito-fondo" id="carrito-fondo" hidden></div>

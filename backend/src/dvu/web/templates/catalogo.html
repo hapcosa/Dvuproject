@@ -37,10 +37,11 @@
         <th class="col-marca">Marca</th>
         <th class="col-medida">Medida</th>
         <th class="col-precio">Precio</th>
+        <th class="col-pedir" id="th-pedir" hidden>Pedir</th>
       </tr>
     </thead>
     <tbody id="filas">
-      <tr><td colspan="7">Cargando…</td></tr>
+      <tr><td colspan="8">Cargando…</td></tr>
     </tbody>
   </table>
 </div>
@@ -64,6 +65,8 @@
   </div>
   <p class="pie" id="ficha-pie"></p>
 </dialog>
+
+{% include "_carrito.html" %}
 {% endblock %}
 
 {% block script %}
@@ -106,11 +109,22 @@ function celdaMarca(p) {
   return DVU.oVacio(p.marca);
 }
 
+/** La celda de pedir. Sólo la ven los que pueden pedir: al administrador le sobra, y al
+ *  que mira sin entrar se le ofrece la puerta en vez de un botón que va a fallar. */
+function celdaPedir(p) {
+  if (!puedePedir) return "";
+  const puesto = DVU.carrito.enLista(p.sku);
+  return `<td class="col-pedir">
+    <button type="button" class="agregar" data-sku="${DVU.escapar(p.sku)}">Agregar</button>
+    ${puesto ? `<span class="pastilla puesta">${DVU.carrito.envases(puesto)} en la lista</span>` : ""}
+  </td>`;
+}
+
 function dibujar(pagina) {
   enPantalla.clear();
   enPantallaTotal = pagina.total;
   if (!pagina.items.length) {
-    filas.innerHTML = '<tr><td colspan="7">Sin resultados para esa búsqueda.</td></tr>';
+    filas.innerHTML = '<tr><td colspan="8">Sin resultados para esa búsqueda.</td></tr>';
   } else {
     pagina.items.forEach((p) => enPantalla.set(p.sku, p));
     filas.innerHTML = pagina.items.map((p) => `
@@ -126,6 +140,7 @@ function dibujar(pagina) {
         <td class="col-marca">${celdaMarca(p)}</td>
         <td class="col-medida">${DVU.oVacio(p.medida)}</td>
         <td class="col-precio">${DVU.pesos(p.precio_lista_clp)}</td>
+        ${celdaPedir(p)}
       </tr>`).join("");
   }
 
@@ -143,7 +158,7 @@ function dibujar(pagina) {
 
 async function cargar() {
   mensaje.hidden = true;
-  filas.innerHTML = '<tr><td colspan="7">Cargando…</td></tr>';
+  filas.innerHTML = '<tr><td colspan="8">Cargando…</td></tr>';
   const parametros = new URLSearchParams({ limite: POR_PAGINA, offset });
   if (consulta) parametros.set("q", consulta);
   if (categoria) parametros.set("categoria", categoria);
@@ -358,16 +373,30 @@ async function abrirFicha(sku) {
     dato("Categoría", DVU.oVacio(p.categoria_nombre)),
   ].join("");
   document.getElementById("ficha-datos").querySelector("dd").classList.add("precio");
-  document.getElementById("ficha-pie").textContent =
+
+  const pie = document.getElementById("ficha-pie");
+  pie.textContent =
     p.multiplo_venta > 1
       ? `Se vende de a ${p.multiplo_venta} ${p.envase || p.unidad_venta}: el pedido tiene que ser múltiplo de esa cantidad.`
       : "Precio neto, no incluye IVA.";
+
+  // La ficha es donde se decide: se pide desde acá sin volver a buscar la fila.
+  if (puedePedir) {
+    const boton = document.createElement("button");
+    boton.type = "button";
+    boton.textContent = "Agregar al pedido";
+    boton.onclick = () => { pedir(p.sku, 1); ficha.close(); };
+    pie.append(" ", boton);
+  }
   ficha.showModal();
 }
 
 filas.onclick = (evento) => {
   const fila = evento.target.closest("tr[data-sku]");
-  if (fila) abrirFicha(fila.dataset.sku);
+  if (!fila) return;
+  // El botón de agregar no abre la ficha: el que va a pedir ya sabe lo que es.
+  if (evento.target.classList.contains("agregar")) return pedir(fila.dataset.sku, 1);
+  abrirFicha(fila.dataset.sku);
 };
 document.getElementById("ficha-cerrar").onclick = () => ficha.close();
 // Clic fuera del contenido: el `dialog` recibe el clic del backdrop.
@@ -378,9 +407,68 @@ ficha.onclose = () => history.replaceState(null, "", location.pathname + locatio
 const enlace = new URLSearchParams(location.hash.slice(1)).get("p");
 if (enlace) abrirFicha(enlace);
 
+/* --- pedir desde el catálogo ---------------------------------------------
+ *
+ * El vendedor está mirando el catálogo con el ferretero al lado. Antes, para agregar
+ * algo tenía que irse a /pedido, perder la búsqueda y encontrar el producto de nuevo.
+ */
+
+/** Sólo el que va a comprar. El administrador no arma pedidos, y al que mira sin entrar
+ *  se le ofrece la puerta en la barra de arriba en vez de un botón que falla. */
+let puedePedir = false;
+
+function pedir(sku, cuantos) {
+  const producto = enPantalla.get(sku);
+  if (producto) DVU.carrito.agregarDesdeCatalogo(producto, cuantos);
+}
+
+async function prepararCarrito() {
+  // `quienSoy` no tira si el token está viejo: el catálogo se mira igual sin entrar.
+  const usuario = await DVU.quienSoy();
+  if (!usuario || !["vendedor", "cliente"].includes(usuario.rol)) return;
+
+  puedePedir = true;
+  document.getElementById("th-pedir").hidden = false;
+  // Acá el drawer es la única superficie del carrito, así que también dice sus errores.
+  DVU.carrito.montarDrawer({
+    alVerCompleta: () => { location.href = "/pedido"; },
+    alEnviar: () => { location.href = "/pedido"; },
+    errores: true,
+  });
+  await DVU.carrito.montar(usuario);
+  // Lo que ya está en la lista se marca en la tabla: agregar dos veces el mismo codo
+  // sin notarlo es el error que esta página tiene que hacer difícil.
+  DVU.carrito.alCambiar(marcarPuestos);
+  marcarPuestos();
+}
+
+/** Actualiza sólo la pastilla de «ya va en la lista» de cada fila.
+ *
+ *  Y no un `dibujar()` entero: repintar la tabla en cada «+» vuelve a montar la banda de
+ *  imprenta, que es una imagen que se baja del servidor. Treinta productos dictados
+ *  serían treinta descargas de la banda. */
+function marcarPuestos() {
+  filas.querySelectorAll("td.col-pedir").forEach((celda) => {
+    const sku = celda.closest("tr").dataset.sku;
+    const puesto = DVU.carrito.enLista(sku);
+    const pastilla = celda.querySelector(".puesta");
+    if (!puesto) return pastilla?.remove();
+    const texto = `${DVU.carrito.envases(puesto)} en la lista`;
+    if (pastilla) return void (pastilla.textContent = texto);
+    const nueva = document.createElement("span");
+    nueva.className = "pastilla puesta";
+    nueva.textContent = texto;
+    celda.append(nueva);
+  });
+}
+
 cargarCategorias();
 cargarBandas();
 cargarPortadas();
+
+/** La tabla espera a saber si va la columna de pedir: dibujarla antes obligaría a
+ *  repintarla entera al llegar la respuesta, y sin sesión `quienSoy` resuelve al tiro. */
+const listoCarrito = prepararCarrito();
 document.getElementById("anterior").onclick = () => {
   offset = Math.max(0, offset - POR_PAGINA);
   cargar();
@@ -392,6 +480,6 @@ document.getElementById("siguiente").onclick = () => {
   scrollTo({ top: 0, behavior: "smooth" });
 };
 
-cargar();
+listoCarrito.then(cargar);
 </script>
 {% endblock %}
